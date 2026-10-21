@@ -17,7 +17,7 @@ variables through a link or short code. An account is only needed for the cloud
 features.
 
 > [!NOTE]
-> Early development (v0.1.0). The test suite passes in CI on Linux, macOS and
+> Early development. The test suite passes in CI on Linux, macOS and
 > Windows, but the cryptographic design has not been independently reviewed. See
 > [Security](#security).
 
@@ -42,7 +42,7 @@ features.
 
 ## Install
 
-The latest release is [v0.1.0](https://github.com/YatharthKaushal/dotvault/releases/latest).
+See the [latest release](https://github.com/YatharthKaushal/dotvault/releases/latest) for the current version.
 
 **Linux and macOS** (x86_64 and aarch64; Linux needs glibc 2.34 or newer):
 
@@ -98,9 +98,35 @@ it with `xattr -d com.apple.quarantine dotvault`). On Alpine and other musl
 systems, and on Linux older than glibc 2.34 (Ubuntu 20.04, Debian 11, RHEL 8),
 build from source.
 
-**Update:** run the installer again. **Uninstall:** delete the binary (and, on
-Windows, the folder and its `PATH` entry). Your env files, settings and saved
-login are not touched; delete the folders listed under
+### Update
+
+dotvault does not update itself or tell you when a new version exists. To update,
+run the same installer you used originally. It fetches the latest release and
+replaces the binary in place. Your env files, settings, index and saved login are
+kept.
+
+| You installed with | Update with |
+| :--- | :--- |
+| `install.sh` (Linux, macOS) | `curl -fsSL https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.sh \| sh` |
+| `install.ps1` (Windows) | `irm https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.ps1 \| iex` |
+| cargo-dist's `dotvault-installer.sh` | `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-installer.sh \| sh` |
+| cargo-dist's `dotvault-installer.ps1` | `powershell -ExecutionPolicy Bypass -c "irm https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-installer.ps1 \| iex"` |
+| a downloaded archive | download the new archive and replace the `dotvault` binary with the one inside |
+| from source | `git pull`, then `cargo install --path crates/dotvault-cli --locked --force` |
+
+Check the result with `dotvault -v`, and compare it with the version on the
+[releases page](https://github.com/YatharthKaushal/dotvault/releases). On Windows,
+close any running `dotvault` first, because Windows will not replace a program that
+is in use. Update with the method you installed with: mixing methods leaves two
+copies in different folders, and the one earlier on your `PATH` wins (`which dotvault`
+on Linux and macOS, `Get-Command dotvault` in PowerShell, shows which one runs).
+
+To pin or roll back to a specific version, set `DOTVAULT_VERSION` as shown above.
+
+### Uninstall
+
+Delete the binary (and, on Windows, the folder and its `PATH` entry). Your env files,
+settings and saved login are not touched; delete the folders listed under
 [Configuration](#configuration) to remove those.
 
 ### From source
