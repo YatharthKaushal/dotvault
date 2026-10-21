@@ -191,6 +191,11 @@ URLs. The download page in `site/` is published to GitHub Pages by
 `.github/workflows/pages.yml`; Pages needs a public repository on the free plan,
 so that job only runs when the repository is public.
 
+CI (`.github/workflows/ci.yml`) runs the full test suite on Ubuntu, macOS (Apple
+Silicon) and Windows (x86_64), plus formatting, clippy, a binary size limit and
+the installers. The Intel macOS and Linux aarch64 builds are produced by the
+release pipeline but not exercised by CI.
+
 ## Not done yet
 
 OS keychain for the session, per-user storage quotas, a second factor, account

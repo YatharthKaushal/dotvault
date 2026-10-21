@@ -178,8 +178,10 @@ non-UTF-8 files are refused rather than corrupted.
 * **Not audited.** The crypto uses well-reviewed RustCrypto primitives and
   standard constructions, but the protocol and the code have had no independent
   review. Do not treat it as audited until they have.
-* Only the Linux build has been exercised in testing so far; macOS and Windows
-  builds are expected to work but are unverified.
+* **Platforms.** CI runs the full test suite and the installers on Linux,
+  macOS (Apple Silicon) and Windows. The Intel macOS and Linux aarch64 builds come
+  from the release pipeline but are not exercised by CI, and most hands-on
+  testing has been on Linux.
 
 ## Reporting a vulnerability
 

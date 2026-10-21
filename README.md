@@ -17,9 +17,9 @@ variables through a link or short code. An account is only needed for the cloud
 features.
 
 > [!NOTE]
-> Early development. It works end to end on Linux. macOS and Windows are
-> untested, there is no published release yet, and the cryptographic design has
-> not been independently reviewed. See [Security](#security).
+> Early development. The test suite passes in CI on Linux, macOS and Windows,
+> but there is no published release yet and the cryptographic design has not
+> been independently reviewed. See [Security](#security).
 
 ## Features
 
