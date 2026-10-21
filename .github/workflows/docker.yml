@@ -1,0 +1,66 @@
+name: Server image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/Dockerfile"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "deploy/Dockerfile"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: build and run the server image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -f deploy/Dockerfile -t dotvault-server .
+
+      - name: Run and check
+        run: |
+          set -eu
+          docker run -d --name dv -p 18080:8080 -v dv-data:/data dotvault-server
+
+          wait_healthy() {
+            for _ in $(seq 1 30); do
+              [ "$(curl -s http://127.0.0.1:18080/healthz)" = ok ] && return 0
+              sleep 1
+            done
+            docker logs dv
+            return 1
+          }
+          wait_healthy
+
+          # the probe the image's own HEALTHCHECK runs (there is no shell or curl inside)
+          docker exec dv /usr/local/bin/dotvault-server --healthcheck
+
+          # runs as an unprivileged user
+          test "$(docker inspect -f '{{.Config.User}}' dv)" = "65532:65532"
+
+          # the data volume is writable by that user and keeps the database
+          curl -fs "http://127.0.0.1:18080/v1/auth/prelogin?username=probe" > before.json
+          docker restart dv
+          wait_healthy
+          curl -fs "http://127.0.0.1:18080/v1/auth/prelogin?username=probe" > after.json
+          # an unknown name gets a salt derived from a secret stored in the database,
+          # so an identical answer after a restart means the database persisted
+          diff before.json after.json
+
+          docker logs dv

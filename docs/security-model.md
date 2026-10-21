@@ -145,7 +145,9 @@ non-UTF-8 files are refused rather than corrupted.
 ## Server
 
 * Everything stored is ciphertext, a hash of a high-entropy derived secret, or
-  metadata (usernames, timestamps, sizes, share ids, who opened what).
+  metadata (usernames, timestamps, sizes, share ids, who opened what). The
+  database file is created readable by the server's user only (mode `0600`,
+  whatever the umask).
 * Sessions are 32 random bytes; only their SHA-256 is stored. They expire after
   30 days of inactivity.
 * Unknown usernames get a stable fake salt from `prelogin`, and wrong password

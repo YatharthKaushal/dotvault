@@ -257,8 +257,10 @@ cargo run --release -p dotvault-server        # listens on 127.0.0.1:8080
 dotvault register --server http://localhost:8080
 ```
 
-For real use, run it behind TLS (the client refuses plain `http://` except for
-localhost) and back up the database. See [docs/deploy.md](docs/deploy.md).
+For real use you need a Linux machine, a domain name and a TLS proxy (the client
+refuses plain `http://` except for localhost), plus backups of the database.
+[docs/deploy.md](docs/deploy.md) has the requirements and step-by-step setup with
+systemd and Caddy, and Docker and Fly.io alternatives.
 
 ## Security
 

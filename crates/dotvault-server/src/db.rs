@@ -50,6 +50,7 @@ pub async fn connect(db_url_or_path: &str) -> Result<SqlitePool, DbError> {
                 std::fs::create_dir_all(parent)?;
             }
         }
+        ensure_private_file(db_url_or_path)?;
         SqliteConnectOptions::new().filename(db_url_or_path)
     };
 
@@ -81,6 +82,38 @@ pub async fn connect(db_url_or_path: &str) -> Result<SqlitePool, DbError> {
     Ok(pool)
 }
 
+/// The database holds usernames, password verifiers and every ciphertext, so it
+/// is created readable by the server's user only, whatever the umask. SQLite
+/// gives the `-wal` and `-shm` files the same permissions as the main file. An
+/// existing file is left alone, with a warning if other users can read it.
+#[cfg(unix)]
+fn ensure_private_file(path: &str) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+    {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if std::fs::metadata(path).is_ok_and(|m| m.mode() & 0o077 != 0) {
+                tracing::warn!(
+                    "the database file is readable by other users; restrict it with: chmod 600 {path}"
+                );
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_private_file(_path: &str) -> std::io::Result<()> {
+    Ok(())
+}
+
 /// Returns the secret used to derive fake prelogin salts, creating and
 /// persisting a random one on first use.
 pub async fn load_or_create_server_secret(pool: &SqlitePool) -> Result<Vec<u8>, DbError> {
@@ -102,4 +135,59 @@ pub async fn load_or_create_server_secret(pool: &SqlitePool) -> Result<Vec<u8>, 
         .execute(pool)
         .await?;
     Ok(read().await?.unwrap_or_else(|| fresh.to_vec()))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    fn mode(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[tokio::test]
+    async fn new_database_files_are_private_whatever_the_umask() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("dotvault.db");
+        let pool = connect(path.to_str().unwrap()).await.unwrap();
+        // the first write creates the -wal and -shm files
+        sqlx::query("INSERT OR IGNORE INTO meta (key, value) VALUES ('probe', x'00')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut checked = Vec::new();
+        for suffix in ["", "-wal", "-shm"] {
+            let mut name = path.clone().into_os_string();
+            name.push(suffix);
+            let file = std::path::PathBuf::from(name);
+            if file.exists() {
+                assert_eq!(mode(&file), 0o600, "{} must be 0600", file.display());
+                checked.push(suffix);
+            }
+        }
+        assert!(
+            checked.contains(&""),
+            "the main database file must have been checked"
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn an_existing_database_keeps_its_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dotvault.db");
+        std::fs::write(&path, b"").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        let pool = connect(path.to_str().unwrap()).await.unwrap();
+        pool.close().await;
+        assert_eq!(
+            mode(&path),
+            0o640,
+            "an existing file must not be changed behind the owner's back"
+        );
+    }
 }

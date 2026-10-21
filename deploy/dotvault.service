@@ -1,0 +1,42 @@
+# systemd unit for dotvault-server.
+#
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin dotvault
+#   sudo install -m 0755 target/release/dotvault-server /usr/local/bin/
+#   sudo cp deploy/dotvault.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now dotvault
+#
+# Change DOTVAULT_PUBLIC_URL to your own address. See docs/deploy.md.
+
+[Unit]
+Description=dotvault server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dotvault
+Group=dotvault
+ExecStart=/usr/local/bin/dotvault-server
+
+Environment=DOTVAULT_BIND=127.0.0.1:8080
+Environment=DOTVAULT_DB=/var/lib/dotvault/dotvault.db
+Environment=DOTVAULT_TRUST_PROXY=1
+Environment=DOTVAULT_PUBLIC_URL=https://vault.example.com
+Environment=RUST_LOG=info,sqlx=warn
+
+# /var/lib/dotvault, owned by the service user and private to it. UMask makes the
+# database and its -wal and -shm files readable by that user only.
+StateDirectory=dotvault
+StateDirectoryMode=0700
+UMask=0077
+
+Restart=on-failure
+RestartSec=2
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target

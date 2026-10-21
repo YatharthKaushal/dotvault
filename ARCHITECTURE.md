@@ -41,7 +41,7 @@ install.sh  install.ps1 installers for Linux/macOS and Windows
 site/                   download page (index.html)
 scripts/                test-install-sh.sh
 docs/                   security-model.md  deploy.md
-deploy/                 Dockerfile  fly.toml  litestream.yml
+deploy/                 dotvault.service  Caddyfile  Dockerfile  fly.toml  litestream.yml
 ```
 
 ## Finding files

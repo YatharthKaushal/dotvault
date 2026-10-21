@@ -1,0 +1,10 @@
+# Caddy reverse proxy: terminates TLS (certificates are issued and renewed
+# automatically) and forwards to dotvault-server. Replace the address with your
+# own domain, whose DNS record must point at this machine.
+#
+# Caddy appends the client address to X-Forwarded-For, which is what
+# DOTVAULT_TRUST_PROXY=1 relies on for rate limiting.
+
+vault.example.com {
+	reverse_proxy 127.0.0.1:8080
+}
