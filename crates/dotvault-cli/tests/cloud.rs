@@ -275,7 +275,9 @@ fn registration_rules() {
 }
 
 #[test]
-fn refuses_plain_http_to_remote_servers_and_needs_a_server() {
+fn refuses_plain_http_to_remote_servers() {
+    // The built-in default server is covered by unit tests: an end-to-end test of it
+    // would call the real hosted server, so these tests always name their own.
     let w = World::new();
     let u = w.user("ada", "ada-long-password-1");
     u.dv()
@@ -283,12 +285,6 @@ fn refuses_plain_http_to_remote_servers_and_needs_a_server() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("plain http"));
-    u.dv()
-        .arg("login")
-        .env_remove("DOTVAULT_SERVER")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("--server"));
 }
 
 #[test]

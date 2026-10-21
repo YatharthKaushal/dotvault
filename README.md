@@ -155,14 +155,23 @@ dotvault edit acme-api:local              # opens $VISUAL / $EDITOR
 Cloud vault:
 
 ```bash
-dotvault register --server https://vault.example.com   # shows a recovery key once
-dotvault push acme-api:production                      # stored as "acme-api/production"
+dotvault register                         # shows a recovery key once
+dotvault push acme-api:production         # stored as "acme-api/production"
 dotvault vault ls
 
 # on another machine
-dotvault login --server https://vault.example.com
+dotvault login
 dotvault pull acme-api/production --out .env --merge
 ```
+
+Unless you say otherwise, the CLI uses the hosted server at https://dotvault.synquic.tech. To use another
+server, pass `--server URL` or set `DOTVAULT_SERVER`; your config file and your last
+session count too. The first successful `register` or `login` saves the server in your
+config, so a later release can never move you to a different one. The hosted server
+stores only ciphertext and account metadata (usernames, timing, sizes). It is run on a
+best-effort basis with no uptime or durability guarantee, so keep your env files and
+don't treat the cloud copy as the only copy. To run your own server, see
+[Self-hosting](#self-hosting).
 
 Sharing:
 
@@ -194,7 +203,7 @@ dotvault shares revoke <id>
 | `unset KEY...` | Remove variables. |
 | `edit [TARGET]` | Open the file in `$VISUAL` / `$EDITOR`. |
 | `diff A B` | Compare two files. `--reveal` shows values. |
-| `register`, `login [--no-cache-key]`, `logout`, `whoami` | Account and session. `--server URL` selects the server. `--no-cache-key` keeps the vault key off disk, so vault commands ask for your password. |
+| `register`, `login [--no-cache-key]`, `logout`, `whoami` | Account and session. `--server URL` selects the server (default: the hosted one). `--no-cache-key` keeps the vault key off disk, so vault commands ask for your password. |
 | `passwd`, `recover` | Change your password, or reset it with the recovery key. |
 | `push [TARGET] [--name N] [--keys A,B]` | Store a file in your vault. The default name is `project/env`. Pushing again adds a version. |
 | `pull NAME --out PATH` | Fetch a vault item. Refuses to overwrite unless you add `--merge` or `--force`. `--stdout` prints instead. |
@@ -235,7 +244,7 @@ refreshes itself; run `dotvault scan` to pick up new folders and
 
 ```toml
 # config.toml
-server = "https://vault.example.com"   # set on first login
+server = "https://dotvault.synquic.tech"   # saved on your first register or login
 roots = ["/home/you/code"]             # managed by `scan` and `roots`
 max_depth = 10
 auto_scan_secs = 600                   # rescan when the index is older than this
@@ -248,7 +257,7 @@ folders are always skipped.
 
 | Environment variable | Used for |
 | :--- | :--- |
-| `DOTVAULT_SERVER` | Server for `register`, `login` and `recover` (same as `--server`). |
+| `DOTVAULT_SERVER` | Server for `register`, `login` and `recover` (same as `--server`). Default: https://dotvault.synquic.tech. |
 | `DOTVAULT_USERNAME`, `DOTVAULT_PASSWORD` | Non-interactive login or registration. |
 | `DOTVAULT_NEW_PASSWORD`, `DOTVAULT_RECOVERY_KEY` | Non-interactive `passwd` and `recover`. |
 | `DOTVAULT_TOKEN` | A session token for scripts, with `DOTVAULT_SERVER`. It can share and open but has no vault key. |
@@ -264,6 +273,9 @@ the interactive prompts for everyday use.
 cargo run --release -p dotvault-server        # listens on 127.0.0.1:8080
 dotvault register --server http://localhost:8080
 ```
+
+Pass `--server` on the first `register` or `login`: without it the CLI would use the
+hosted server. After the first success it remembers the address.
 
 For real use you need a Linux machine, a domain name and a TLS proxy (the client
 refuses plain `http://` except for localhost), plus backups of the database.
@@ -282,6 +294,9 @@ systemd and Caddy, and Docker and Fly.io alternatives.
   lose both, the cloud data cannot be recovered.
 - The session is kept in a `0600` file, not the OS keychain, and the design has
   not been independently reviewed.
+- The CLI's default server is run by the maintainer. It cannot read your data, but
+  it sees account metadata (usernames, timing, sizes). Use `--server` with your own
+  server to avoid that.
 
 Details and known limits are in [docs/security-model.md](docs/security-model.md).
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).

@@ -144,6 +144,12 @@ non-UTF-8 files are refused rather than corrupted.
 
 ## Server
 
+* **The default server.** Without `--server`, the CLI talks to https://dotvault.synquic.tech, run by the
+  maintainer on a best-effort basis (no uptime or durability guarantee). It stores
+  ciphertext and the metadata listed below, and cannot read your data. The CLI says
+  when it uses the default, and the first successful `register` or `login` saves the
+  chosen address in the config, so a later release cannot silently move you. Use
+  `--server` or run your own server to avoid depending on it.
 * Everything stored is ciphertext, a hash of a high-entropy derived secret, or
   metadata (usernames, timestamps, sizes, share ids, who opened what). The
   database file is created readable by the server's user only (mode `0600`,

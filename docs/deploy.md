@@ -81,6 +81,10 @@ dotvault whoami
 
 `register` shows your recovery key once. Keep it somewhere safe.
 
+Pass `--server` on that first `register` or `login`. Without it the CLI uses the
+default hosted server, not yours. After the first success it saves your address in its
+config, or you can set `DOTVAULT_SERVER`.
+
 ## Configuration
 
 Settings are environment variables; the service file sets them. The server

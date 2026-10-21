@@ -11,10 +11,18 @@ use crate::output::Format;
     name = "dotvault",
     version,
     about = "Find, view, edit, store and share your .env files from one place",
+    disable_version_flag = true,
     propagate_version = true,
     arg_required_else_help = true
 )]
 pub struct Cli {
+    /// Print version
+    // clap's own flag is only `-V`; people also reach for `-v`. The field is never read:
+    // clap prints the version and exits when the flag is seen.
+    #[arg(short = 'v', short_alias = 'V', long, action = clap::ArgAction::Version, global = true)]
+    #[allow(dead_code)]
+    version: Option<bool>,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -234,7 +242,7 @@ pub struct DiffArgs {
 
 #[derive(Args, Debug)]
 pub struct RegisterArgs {
-    /// Server to register on (default: the one in your config)
+    /// Server to register on (default: your config, your last session, or the hosted server)
     #[arg(long, value_name = "URL", env = "DOTVAULT_SERVER")]
     pub server: Option<String>,
     #[arg(short, long)]
@@ -243,7 +251,7 @@ pub struct RegisterArgs {
 
 #[derive(Args, Debug)]
 pub struct LoginArgs {
-    /// Server to log in to (default: the one in your config or last session)
+    /// Server to log in to (default: your config, your last session, or the hosted server)
     #[arg(long, value_name = "URL", env = "DOTVAULT_SERVER")]
     pub server: Option<String>,
     #[arg(short, long)]
@@ -255,6 +263,7 @@ pub struct LoginArgs {
 
 #[derive(Args, Debug)]
 pub struct RecoverArgs {
+    /// Server to recover on (default: your config, your last session, or the hosted server)
     #[arg(long, value_name = "URL", env = "DOTVAULT_SERVER")]
     pub server: Option<String>,
     #[arg(short, long)]
@@ -471,6 +480,41 @@ mod tests {
                 (id.to_string(), true),
                 "{id}"
             );
+        }
+    }
+
+    /// `-v`, `-V` and `--version` print the version on the root command and on every
+    /// subcommand. A custom version flag that is inherited without a propagated version
+    /// panics at parse time, so every command in the tree is tried.
+    #[test]
+    fn version_flags_work_on_every_command() {
+        use clap::{error::ErrorKind, CommandFactory, Parser};
+
+        fn collect(cmd: &clap::Command, path: Vec<String>, out: &mut Vec<Vec<String>>) {
+            out.push(path.clone());
+            for sub in cmd.get_subcommands().filter(|c| c.get_name() != "help") {
+                let mut next = path.clone();
+                next.push(sub.get_name().to_string());
+                collect(sub, next, out);
+            }
+        }
+        let mut paths = Vec::new();
+        collect(&super::Cli::command(), Vec::new(), &mut paths);
+        assert!(
+            paths.len() > 25,
+            "expected the whole command tree, got {}",
+            paths.len()
+        );
+
+        for path in &paths {
+            for flag in ["-v", "-V", "--version"] {
+                let mut args = vec!["dotvault".to_string()];
+                args.extend(path.iter().cloned());
+                args.push(flag.to_string());
+                let err = super::Cli::try_parse_from(&args).expect_err("version exits early");
+                assert_eq!(err.kind(), ErrorKind::DisplayVersion, "{args:?}");
+                assert!(err.to_string().starts_with("dotvault"), "{args:?}: {err}");
+            }
         }
     }
 

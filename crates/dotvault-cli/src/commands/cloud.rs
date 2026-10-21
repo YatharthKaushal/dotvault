@@ -11,6 +11,7 @@ use dotvault_core::crypto::{self, derive_account_keys, unlock_with_password, Key
 use dotvault_core::dotenv::DotEnv;
 use dotvault_core::payload::EnvPayload;
 use dotvault_core::share_code;
+use owo_colors::OwoColorize;
 
 use super::{read_text, Ctx};
 use crate::client::{normalize_server, Api, ApiError};
@@ -33,15 +34,24 @@ impl Ctx {
         Ok(Cloud { session, api })
     }
 
-    /// Server for register / login / recover: the flag, else the config,
-    /// else the server of the current session.
+    /// Server for register / login / recover: the flag or `DOTVAULT_SERVER`, else
+    /// the config, else the server of the current session, else [`DEFAULT_SERVER`].
+    /// Says so when the default is used, so nobody registers on it by accident.
     pub fn pick_server(&self, flag: Option<&str>) -> Result<String> {
-        let chosen = flag
-            .map(str::to_string)
-            .or_else(|| self.config.server.clone())
-            .or_else(|| self.session_store().load().ok().flatten().map(|s| s.server))
-            .ok_or_else(|| anyhow!("no server configured; pass --server https://your-server"))?;
-        normalize_server(&chosen)
+        let session = self.session_store().load().ok().flatten().map(|s| s.server);
+        let (chosen, defaulted) =
+            choose_server(flag, self.config.server.as_deref(), session.as_deref());
+        let server = normalize_server(&chosen)?;
+        if defaulted {
+            anstream::eprintln!(
+                "{}",
+                format!(
+                    "Using the default server {server}. Use --server or DOTVAULT_SERVER for another one."
+                )
+                .dimmed()
+            );
+        }
+        Ok(server)
     }
 
     /// Saves the server in the config the first time, so it need not be retyped.
@@ -50,6 +60,24 @@ impl Ctx {
             self.config.server = Some(server.to_string());
             let _ = self.config.save(&self.dirs);
         }
+    }
+}
+
+/// The hosted server, used when nothing else says which one to talk to. The first
+/// successful `register` or `login` saves the chosen server in the config, so a
+/// later release that changes this value cannot silently move anyone.
+pub const DEFAULT_SERVER: &str = "https://dotvault.synquic.tech";
+
+/// Which server to use, and whether it is the built-in default. Order: the flag
+/// (or `DOTVAULT_SERVER`), the config file, the saved session, the default.
+fn choose_server(
+    flag: Option<&str>,
+    configured: Option<&str>,
+    session: Option<&str>,
+) -> (String, bool) {
+    match flag.or(configured).or(session) {
+        Some(server) => (server.to_string(), false),
+        None => (DEFAULT_SERVER.to_string(), true),
     }
 }
 
@@ -357,6 +385,56 @@ mod tests {
         let msg = write_env_file(&path, &payload(&[("A", "1")]), false, false).unwrap();
         assert!(msg.starts_with("Wrote 1 variable to"), "{msg}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "A=1\n");
+    }
+
+    #[test]
+    fn server_choice_follows_the_documented_order() {
+        let (s, defaulted) = choose_server(
+            Some("https://flag"),
+            Some("https://cfg"),
+            Some("https://sess"),
+        );
+        assert_eq!((s.as_str(), defaulted), ("https://flag", false));
+        let (s, defaulted) = choose_server(None, Some("https://cfg"), Some("https://sess"));
+        assert_eq!((s.as_str(), defaulted), ("https://cfg", false));
+        let (s, defaulted) = choose_server(None, None, Some("https://sess"));
+        assert_eq!((s.as_str(), defaulted), ("https://sess", false));
+        let (s, defaulted) = choose_server(None, None, None);
+        assert_eq!((s.as_str(), defaulted), (DEFAULT_SERVER, true));
+    }
+
+    #[test]
+    fn the_default_server_is_a_valid_https_origin() {
+        assert!(DEFAULT_SERVER.starts_with("https://"));
+        // normalizing must not change it, or the saved config would differ from the constant
+        assert_eq!(normalize_server(DEFAULT_SERVER).unwrap(), DEFAULT_SERVER);
+    }
+
+    #[test]
+    fn the_chosen_server_is_saved_once_and_then_kept() {
+        use crate::config::{Config, Dirs};
+        let dir = tempfile::tempdir().unwrap();
+        let dirs = Dirs {
+            config: dir.path().join("cfg"),
+            data: dir.path().join("data"),
+        };
+        let mut ctx = Ctx {
+            dirs: dirs.clone(),
+            config: Config::default(),
+        };
+
+        ctx.remember_server(DEFAULT_SERVER);
+        assert_eq!(
+            Config::load(&dirs).unwrap().server.as_deref(),
+            Some(DEFAULT_SERVER)
+        );
+
+        // a later choice (for example another --server) must not rewrite the saved one
+        ctx.remember_server("https://other.example");
+        assert_eq!(
+            Config::load(&dirs).unwrap().server.as_deref(),
+            Some(DEFAULT_SERVER)
+        );
     }
 
     #[test]

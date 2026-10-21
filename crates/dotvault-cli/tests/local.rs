@@ -684,9 +684,11 @@ fn completions_and_config_and_help() {
         .stdout(predicate::str::contains("config file"))
         .stdout(predicate::str::contains("(not set)"));
     s.dv().assert().failure(); // no subcommand: usage
-    s.dv()
-        .arg("--version")
-        .assert()
-        .success()
-        .stdout(predicate::str::starts_with("dotvault "));
+    for flag in ["--version", "-v", "-V"] {
+        s.dv()
+            .arg(flag)
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("dotvault "));
+    }
 }

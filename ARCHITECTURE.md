@@ -166,6 +166,10 @@ appears.
 - **Session in a private file.** `session.json` (mode `0600`, atomic writes). An
   OS keychain backend is not implemented because it could not be tested on every
   platform.
+- **Default server.** Used only when neither `--server`, `DOTVAULT_SERVER`, the config
+  nor a saved session names one; the CLI prints a notice when it applies, and the first
+  successful `register` or `login` saves the choice in the config so a later release
+  cannot move existing users. The constant lives in `commands/cloud.rs`.
 - **Plain HTTP server.** TLS is the proxy's job. The CLI refuses non-HTTPS
   servers except on loopback.
 - **Naming.** The package and binary are `dotvault`; the directory is
