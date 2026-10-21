@@ -37,8 +37,8 @@ features.
   server stores only ciphertext.
 - Shares chosen variables through a link or short code, with an expiry, an open
   limit, revocation and a log of who opened it. The recipient needs an account.
-- One native binary under 5 MB. It starts in about 2 ms and lists hundreds of env
-  files in about 11 ms.
+- One native binary of 4 to 5 MB depending on the platform. On Linux it starts in
+  under 2 ms and lists 600 env files across 300 projects in about 11 ms.
 
 ## Install
 
@@ -64,6 +64,16 @@ administrator rights. Read them first: [install.sh](install.sh),
 and put `dotvault` on your `PATH`. The same commands and direct download links are
 on the [download page](https://yatharthkaushal.github.io/dotvault/) (source in
 [site/](site/index.html)).
+
+Each release also carries `dotvault-installer.sh` and `dotvault-installer.ps1`
+from [cargo-dist](https://github.com/axodotdev/cargo-dist), which the release
+notes show. They install into `~/.cargo/bin` (`%USERPROFILE%\.cargo\bin` on
+Windows) and add that folder to your `PATH`. Use either installer, not both, or
+you will have two copies in different folders.
+
+To check a download yourself, every archive has a `.sha256` file beside it:
+`sha256sum -c dotvault-x86_64-unknown-linux-gnu.tar.xz.sha256` on Linux,
+`shasum -a 256 -c` on macOS, or compare it with `Get-FileHash` in PowerShell.
 
 | | Linux and macOS | Windows |
 | :--- | :--- | :--- |
