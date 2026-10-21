@@ -38,7 +38,7 @@ serve() { # dir -> sets $url, $srv
     python3 -m http.server "$port" --bind 127.0.0.1 --directory "$1" >/dev/null 2>&1 &
     srv=$!
     url="http://127.0.0.1:$port"
-    for _ in $(seq 1 50); do
+    for _ in $(seq 1 150); do
         curl -fs -o /dev/null "$url/$asset" 2>/dev/null && return 0
         sleep 0.1
     done

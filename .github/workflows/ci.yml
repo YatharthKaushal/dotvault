@@ -119,7 +119,18 @@ jobs:
           $hash = (Get-FileHash "fake/$name" -Algorithm SHA256).Hash.ToLower()
           "$hash *$name" | Out-File -Encoding ascii "fake/$name.sha256"
           Start-Process python -ArgumentList '-m', 'http.server', '8000', '--bind', '127.0.0.1', '--directory', 'fake' -WindowStyle Hidden
-          Start-Sleep -Seconds 3
+          # wait until the file server really answers; a fixed sleep raced on slow runners
+          $ready = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8000/$name.sha256" | Out-Null
+              $ready = $true
+              break
+            } catch {
+              Start-Sleep -Milliseconds 500
+            }
+          }
+          if (-not $ready) { throw 'the test file server did not start within 30 seconds' }
 
           $env:DOTVAULT_DOWNLOAD_URL = 'http://127.0.0.1:8000'
           $env:DOTVAULT_INSTALL_DIR = "$env:RUNNER_TEMP\bin-pwsh"
