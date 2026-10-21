@@ -56,6 +56,27 @@ is_musl() {
     return 1
 }
 
+# The Linux binaries are built on Ubuntu 22.04 and need glibc 2.34 or newer.
+MIN_GLIBC_MAJOR=2
+MIN_GLIBC_MINOR=34
+
+# Prints the glibc version ("2.35"), or nothing if it cannot be read.
+glibc_version() {
+    command -v ldd >/dev/null 2>&1 || return 0
+    ldd --version 2>&1 | head -n 1 | awk '{print $NF}' | grep -E '^[0-9]+\.[0-9]+' | cut -d . -f 1,2
+}
+
+# True when the version is new enough, or when it cannot be determined (the
+# check must never block a working system).
+glibc_new_enough() {
+    ver=$(glibc_version)
+    [ -n "$ver" ] || return 0
+    major=${ver%%.*}
+    minor=${ver#*.}
+    [ "$major" -gt "$MIN_GLIBC_MAJOR" ] && return 0
+    [ "$major" -eq "$MIN_GLIBC_MAJOR" ] && [ "$minor" -ge "$MIN_GLIBC_MINOR" ]
+}
+
 detect_target() {
     if [ -n "${DOTVAULT_TARGET:-}" ]; then
         printf '%s' "$DOTVAULT_TARGET"
@@ -73,6 +94,9 @@ detect_target() {
             esac
             if is_musl; then
                 err "the prebuilt Linux binaries need glibc and this system uses musl; build from source instead: cargo install --path crates/dotvault-cli"
+            fi
+            if ! glibc_new_enough; then
+                err "the prebuilt Linux binaries need glibc $MIN_GLIBC_MAJOR.$MIN_GLIBC_MINOR or newer (Ubuntu 22.04, Debian 12, RHEL 9 or later) and this system has $(glibc_version); build from source instead: cargo install --path crates/dotvault-cli"
             fi
             printf '%s-unknown-linux-gnu' "$cpu"
             ;;

@@ -220,6 +220,28 @@ check "points Windows users at install.ps1" '[ $status -ne 0 ] && echo "$out" | 
 detect Linux x86_64 0 "musl libc (x86_64) Version 1.2.4"
 check "refuses musl Linux with a clear message" '[ $status -ne 0 ] && [ -z "$got" ] && [ ! -s "$tmp/curl.log" ] && echo "$out" | grep -q "glibc"'
 
+for case in \
+    "ldd (Debian GLIBC 2.31-13+deb11u11) 2.31|2.31" \
+    "ldd (Ubuntu GLIBC 2.31-0ubuntu9.16) 2.31|2.31" \
+    "ldd (GNU libc) 2.28|2.28" \
+    "ldd (GNU libc) 2.33|2.33"; do
+    lddout=${case%%|*}
+    want=${case##*|}
+    detect Linux x86_64 0 "$lddout"
+    check "refuses glibc $want as too old, before downloading" '[ $status -ne 0 ] && [ -z "$got" ] && [ ! -s "$tmp/curl.log" ] && echo "$out" | grep -q "glibc 2.34 or newer" && echo "$out" | grep -q "has $want"'
+done
+
+for lddout in "ldd (GNU libc) 2.34" "ldd (Ubuntu GLIBC 2.35-0ubuntu3.15) 2.35" "ldd (Debian GLIBC 2.36-9+deb12u7) 2.36" "ldd (GNU libc) 2.39" "ldd (GNU libc) 3.0"; do
+    detect Linux x86_64 0 "$lddout"
+    check "accepts $lddout" '[ -n "$got" ]'
+done
+
+# never block a system whose glibc version cannot be read
+for lddout in "ldd: something unexpected" ""; do
+    detect Linux x86_64 0 "$lddout"
+    check "does not block when the glibc version is unreadable (${lddout:-empty output})" '[ -n "$got" ]'
+done
+
 # The checks above must be able to fail: a supported platform really reaches curl.
 detect Linux x86_64
 check "a supported platform does reach curl" '[ -n "$got" ] && [ -s "$tmp/curl.log" ]'

@@ -47,7 +47,7 @@ features.
 > cannot download anything until the first release exists. Until then,
 > [build from source](#from-source).
 
-**Linux and macOS** (x86_64 and aarch64; Linux needs glibc):
+**Linux and macOS** (x86_64 and aarch64; Linux needs glibc 2.34 or newer):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.sh | sh
@@ -88,7 +88,8 @@ If the script says the install folder is not on your `PATH`, add it, for example
 new terminal after installing. The macOS binaries are not signed; files fetched
 by the script are not quarantined, but one downloaded in a browser may be (clear
 it with `xattr -d com.apple.quarantine dotvault`). On Alpine and other musl
-systems, build from source.
+systems, and on Linux older than glibc 2.34 (Ubuntu 20.04, Debian 11, RHEL 8),
+build from source.
 
 **Update:** run the installer again. **Uninstall:** delete the binary (and, on
 Windows, the folder and its `PATH` entry). Your env files, settings and saved

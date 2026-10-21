@@ -412,6 +412,7 @@ pub enum SharesCommand {
     /// See who opened or saved a share
     Log {
         /// Share id (a unique prefix is enough)
+        #[arg(allow_hyphen_values = true)]
         id: String,
         #[arg(long)]
         json: bool,
@@ -419,6 +420,7 @@ pub enum SharesCommand {
     /// Stop a share from working
     Revoke {
         /// Share id (a unique prefix is enough)
+        #[arg(allow_hyphen_values = true)]
         id: String,
     },
 }
@@ -432,5 +434,59 @@ mod tests {
     #[test]
     fn command_definition_is_valid() {
         super::Cli::command().debug_assert();
+    }
+
+    /// Share ids are base64url, so about 1 in 64 start with `-` (or `_`). They
+    /// must be accepted as values, not mistaken for options.
+    #[test]
+    fn share_ids_starting_with_a_hyphen_are_accepted() {
+        use super::{Command, SharesCommand};
+        use clap::Parser;
+
+        let id_of = |args: &[&str]| match super::Cli::try_parse_from(args).unwrap().command {
+            Command::Shares {
+                command: SharesCommand::Log { id, json },
+            } => (id, json),
+            Command::Shares {
+                command: SharesCommand::Revoke { id },
+            } => (id, false),
+            _ => panic!("not a shares command"),
+        };
+
+        for id in ["-2abcde", "-abcdef", "-", "-_-_-_", "_-abcd", "-x"] {
+            assert_eq!(
+                id_of(&["dotvault", "shares", "log", id]),
+                (id.to_string(), false),
+                "{id}"
+            );
+            assert_eq!(id_of(&["dotvault", "shares", "revoke", id]).0, id, "{id}");
+            // options may come before or after the id
+            assert_eq!(
+                id_of(&["dotvault", "shares", "log", "--json", id]),
+                (id.to_string(), true),
+                "{id}"
+            );
+            assert_eq!(
+                id_of(&["dotvault", "shares", "log", id, "--json"]),
+                (id.to_string(), true),
+                "{id}"
+            );
+        }
+    }
+
+    /// Accepting hyphens must not turn a real option into the id.
+    #[test]
+    fn a_missing_id_is_still_an_error() {
+        use clap::Parser;
+        for args in [
+            &["dotvault", "shares", "log"][..],
+            &["dotvault", "shares", "log", "--json"][..],
+            &["dotvault", "shares", "revoke"][..],
+        ] {
+            assert!(
+                super::Cli::try_parse_from(args).is_err(),
+                "{args:?} should be rejected"
+            );
+        }
     }
 }

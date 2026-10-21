@@ -71,7 +71,7 @@
   <section class="platform" id="linux">
     <h3>Linux</h3>
     <div class="cmd"><pre><code>curl -fsSL https://yatharthkaushal.github.io/dotvault/install.sh | sh</code></pre></div>
-    <p class="small">x86_64 and aarch64 (glibc). Installs <code>dotvault</code> into <code>~/.local/bin</code>.</p>
+    <p class="small">x86_64 and aarch64, glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9 or later). Installs <code>dotvault</code> into <code>~/.local/bin</code>.</p>
   </section>
 
   <section class="platform" id="mac">
@@ -109,7 +109,7 @@
     <tr><td>macOS Intel</td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-apple-darwin.tar.xz">dotvault-x86_64-apple-darwin.tar.xz</a></td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-apple-darwin.tar.xz.sha256">sha256</a></td></tr>
     <tr><td>Windows x64</td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-pc-windows-msvc.zip">dotvault-x86_64-pc-windows-msvc.zip</a></td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-pc-windows-msvc.zip.sha256">sha256</a></td></tr>
   </table>
-  <p class="small">The Linux builds need glibc; on Alpine, build from source. All releases are listed on the <a href="https://github.com/YatharthKaushal/dotvault/releases">releases page</a>.</p>
+  <p class="small">The Linux builds need glibc 2.34 or newer; on older systems (Ubuntu 20.04, Debian 11, RHEL 8) and on Alpine, build from source. All releases are listed on the <a href="https://github.com/YatharthKaushal/dotvault/releases">releases page</a>.</p>
 
   <h2 id="source">Build from source</h2>
   <p>Needs <a href="https://rustup.rs/">Rust</a> 1.85 or newer and a C compiler (Linux: <code>build-essential</code> or <code>gcc</code>; macOS: Xcode Command Line Tools; Windows: Visual Studio C++ Build Tools).</p>
