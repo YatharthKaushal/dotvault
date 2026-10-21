@@ -71,3 +71,85 @@ jobs:
           size=$(stat -c %s target/release/dotvault)
           echo "dotvault is $((size / 1024)) KiB"
           test "$size" -lt $((6 * 1024 * 1024))
+
+  # Runs the real install scripts against a release built on the spot and
+  # served from localhost, so they are exercised on every platform before a
+  # release exists.
+  install:
+    name: install scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --locked -p dotvault
+
+      - name: install.sh
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -eu
+          target=$(rustc -vV | sed -n 's/^host: //p')
+          name="dotvault-$target.tar.xz"
+          mkdir -p "fake/pkg/dotvault-$target"
+          cp target/debug/dotvault "fake/pkg/dotvault-$target/"
+          tar -C fake/pkg -cJf "fake/$name" "dotvault-$target"
+          hash=$(cd fake && (sha256sum "$name" 2>/dev/null || shasum -a 256 "$name") | cut -d ' ' -f 1)
+          echo "$hash *$name" > "fake/$name.sha256"
+          bash scripts/test-install-sh.sh fake
+
+      - name: install.ps1 (PowerShell 7)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $target = (rustc -vV | Select-String '^host: (.*)$').Matches[0].Groups[1].Value
+          $name = "dotvault-$target.zip"
+          New-Item -ItemType Directory -Force -Path "fake/pkg/dotvault-$target" | Out-Null
+          Copy-Item target/debug/dotvault.exe "fake/pkg/dotvault-$target/"
+          Compress-Archive -Path "fake/pkg/dotvault-$target" -DestinationPath "fake/$name"
+          $hash = (Get-FileHash "fake/$name" -Algorithm SHA256).Hash.ToLower()
+          "$hash *$name" | Out-File -Encoding ascii "fake/$name.sha256"
+          Start-Process python -ArgumentList '-m', 'http.server', '8000', '--bind', '127.0.0.1', '--directory', 'fake' -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+
+          $env:DOTVAULT_DOWNLOAD_URL = 'http://127.0.0.1:8000'
+          $env:DOTVAULT_INSTALL_DIR = "$env:RUNNER_TEMP\bin-pwsh"
+          $env:DOTVAULT_NO_MODIFY_PATH = '1'
+          # the way users run it: piped into iex
+          Get-Content install.ps1 -Raw | Invoke-Expression
+          & "$env:DOTVAULT_INSTALL_DIR\dotvault.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw 'installed binary failed' }
+
+          # a wrong checksum must stop the installer and install nothing
+          "0000000000000000000000000000000000000000000000000000000000000000 *$name" | Out-File -Encoding ascii "fake/$name.sha256"
+          Remove-Item -Recurse -Force $env:DOTVAULT_INSTALL_DIR
+          $failed = $false
+          try { Get-Content install.ps1 -Raw | Invoke-Expression } catch { $failed = $true }
+          if (-not $failed) { throw 'install.ps1 accepted a bad checksum' }
+          if (Test-Path "$env:DOTVAULT_INSTALL_DIR\dotvault.exe") { throw 'a binary was installed despite the bad checksum' }
+
+      - name: install.ps1 (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          # restore the good checksum written by the previous step
+          $target = (rustc -vV | Select-String '^host: (.*)$').Matches[0].Groups[1].Value
+          $name = "dotvault-$target.zip"
+          $hash = (Get-FileHash "fake/$name" -Algorithm SHA256).Hash.ToLower()
+          "$hash *$name" | Out-File -Encoding ascii "fake/$name.sha256"
+
+          $env:DOTVAULT_DOWNLOAD_URL = 'http://127.0.0.1:8000'
+          $env:DOTVAULT_INSTALL_DIR = "$env:RUNNER_TEMP\bin-ps51"
+          $env:DOTVAULT_NO_MODIFY_PATH = '1'
+          Get-Content install.ps1 -Raw | Invoke-Expression
+          & "$env:DOTVAULT_INSTALL_DIR\dotvault.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw 'installed binary failed' }

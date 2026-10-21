@@ -42,17 +42,68 @@ features.
 
 ## Install
 
-There is no published release yet, so build from source.
+> [!IMPORTANT]
+> There is no published release yet, and the repository is private for now. The
+> install scripts work for everyone once the repository is public and a release
+> exists. Until then, [build from source](#from-source).
 
-| Platform | Needs | Prebuilt (after the first release) |
+**Linux and macOS** (x86_64 and aarch64; Linux needs glibc):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.sh | sh
+```
+
+**Windows** (PowerShell, x64):
+
+```powershell
+irm https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.ps1 | iex
+```
+
+The scripts download the archive for your platform from GitHub Releases, verify
+its SHA-256 checksum and copy the binary into place. They need no `sudo` or
+administrator rights. Read them first: [install.sh](install.sh),
+[install.ps1](install.ps1). You can also pick an archive yourself from the
+[releases page](https://github.com/YatharthKaushal/dotvault/releases), extract it
+and put `dotvault` on your `PATH`. The [site/](site/index.html) folder holds a
+download page with the same commands and direct links; it is published with
+GitHub Pages (`https://yatharthkaushal.github.io/dotvault/`) once the repository is public.
+
+| | Linux and macOS | Windows |
 | :--- | :--- | :--- |
-| Linux (x86_64, aarch64, glibc) | Rust 1.85+, a C compiler (`build-essential`, `gcc` or `base-devel`) | shell installer or `.tar.xz` |
-| macOS (Apple Silicon, Intel) | Rust 1.85+, Xcode Command Line Tools (`xcode-select --install`) | shell installer or `.tar.xz` |
-| Windows (x86_64) | Rust 1.85+, [C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) ("Desktop development with C++") | PowerShell installer or `.zip` |
+| Installs to | `~/.local/bin/dotvault` | `%LOCALAPPDATA%\Programs\dotvault\dotvault.exe`, added to your user `PATH` |
+| Options | `DOTVAULT_VERSION`, `DOTVAULT_INSTALL_DIR` (or `--version`, `--dir`) | `DOTVAULT_VERSION`, `DOTVAULT_INSTALL_DIR`, `DOTVAULT_NO_MODIFY_PATH=1` |
 
-Install Rust with [rustup](https://rustup.rs/).
+Set the variables on the `sh` side of the pipe, because that is the process that
+reads them:
 
-**From source** (all platforms):
+```bash
+curl -fsSL https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.sh | DOTVAULT_VERSION=v0.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.sh | sh -s -- --dir ~/bin
+```
+
+In PowerShell, set `$env:DOTVAULT_VERSION = "v0.1.0"` before running the installer.
+
+If the script says the install folder is not on your `PATH`, add it, for example
+`export PATH="$HOME/.local/bin:$PATH"` in your shell profile. On Windows, open a
+new terminal after installing. The macOS binaries are not signed; files fetched
+by the script are not quarantined, but one downloaded in a browser may be (clear
+it with `xattr -d com.apple.quarantine dotvault`). On Alpine and other musl
+systems, build from source.
+
+**Update:** run the installer again. **Uninstall:** delete the binary (and, on
+Windows, the folder and its `PATH` entry). Your env files, settings and saved
+login are not touched; delete the folders listed under
+[Configuration](#configuration) to remove those.
+
+### From source
+
+| Platform | Needs |
+| :--- | :--- |
+| Linux | Rust 1.85+, a C compiler (`build-essential`, `gcc` or `base-devel`) |
+| macOS | Rust 1.85+, Xcode Command Line Tools (`xcode-select --install`) |
+| Windows | Rust 1.85+, [C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) ("Desktop development with C++") |
+
+Install Rust with [rustup](https://rustup.rs/), then on any platform:
 
 ```bash
 git clone https://github.com/YatharthKaushal/dotvault.git
@@ -61,37 +112,14 @@ cargo install --path crates/dotvault-cli --locked
 dotvault --version
 ```
 
-**Prebuilt** (once a release is published and the repository is public):
+This puts the binary in Cargo's bin folder: `~/.cargo/bin/dotvault`, or
+`%USERPROFILE%\.cargo\bin\dotvault.exe` on Windows. To update, `git pull` and
+rerun the command with `--force`; to uninstall, `cargo uninstall dotvault`.
 
-```bash
-# Linux and macOS
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-installer.sh | sh
+### Completions
 
-# Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-installer.ps1 | iex"
-```
-
-You can also download the archive for your platform from the
-[releases page](https://github.com/YatharthKaushal/dotvault/releases), extract it
-and put `dotvault` on your `PATH`. The macOS binaries are not signed; if macOS
-blocks one downloaded in a browser, run `xattr -d com.apple.quarantine dotvault`.
-The Linux binaries need glibc, so build from source on Alpine.
-
-**Where it goes.** Both methods put the binary in Cargo's bin folder:
-`~/.cargo/bin/dotvault` on Linux and macOS, `%USERPROFILE%\.cargo\bin\dotvault.exe`
-on Windows. If your shell cannot find it, add that folder to `PATH`. The
-installers also accept `DOTVAULT_INSTALL_DIR` (install elsewhere) and
-`DOTVAULT_NO_MODIFY_PATH=1` (leave your shell profile alone); set them on the
-`sh` side of the pipe, for example `curl ... | DOTVAULT_INSTALL_DIR=~/bin sh`.
-Settings and the index live elsewhere; see [Configuration](#configuration).
-
-**Update:** `git pull`, then rerun the `cargo install` command with `--force`, or
-rerun the installer. **Uninstall:** `cargo uninstall dotvault`, or delete the
-binary. Your env files, settings and saved login are not touched; delete the
-folders listed under [Configuration](#configuration) to remove those.
-
-**Completions:** `dotvault completions <bash|zsh|fish|elvish|powershell>` prints a
-script, for example `dotvault completions bash > ~/.local/share/bash-completion/completions/dotvault`.
+`dotvault completions <bash|zsh|fish|elvish|powershell>` prints a script, for
+example `dotvault completions bash > ~/.local/share/bash-completion/completions/dotvault`.
 
 ## Usage
 

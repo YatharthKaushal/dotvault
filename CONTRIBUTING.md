@@ -34,6 +34,11 @@ cargo test --workspace --locked
 real server on a free port and run the real binary, so they need no setup. A few
 tests run a real `sh` and only run on Unix.
 
+`install.sh` and `install.ps1` are tested by CI against a release built on the
+spot. To run the shell installer's suite yourself, point it at a folder holding
+`dotvault-<target>.tar.xz` and its `.sha256` for your machine:
+`bash scripts/test-install-sh.sh DIR`.
+
 ## Layout
 
 | Path | Contains |
@@ -41,6 +46,8 @@ tests run a real `sh` and only run on Unix.
 | `crates/dotvault-core/` | `.env` parser, crypto, share codes, API types, shared by CLI and server |
 | `crates/dotvault-cli/` | The `dotvault` binary; `src/commands/` has one module per command group |
 | `crates/dotvault-server/` | axum routes, auth, rate limiting, migrations |
+| `install.sh`, `install.ps1`, `scripts/` | The installers and the test for the shell one |
+| `site/` | The download page, published to GitHub Pages |
 | `docs/`, `deploy/` | Security model and deployment guide; Dockerfile and templates |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together.

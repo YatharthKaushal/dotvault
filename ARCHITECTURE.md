@@ -37,6 +37,9 @@ crates/
     migrations/         0001_init.sql
     assets/             share.html  share.js
     tests/              auth  vault  shares  security  logging
+install.sh  install.ps1 installers for Linux/macOS and Windows
+site/                   download page (index.html)
+scripts/                test-install-sh.sh
 docs/                   security-model.md  deploy.md
 deploy/                 Dockerfile  fly.toml  litestream.yml
 ```
@@ -176,6 +179,17 @@ Linux (x86_64, aarch64), macOS (Apple Silicon, Intel) and Windows (x86_64), plus
 shell and PowerShell installers. The server ships as a container image
 (`deploy/Dockerfile`). Homebrew, winget, Scoop, MSI and deb/rpm packages are not
 set up.
+
+`install.sh` (Linux, macOS) and `install.ps1` (Windows) are the documented way to
+install. They detect the platform, download `dotvault-<target>.tar.xz` (or `.zip`)
+and its `.sha256` from the GitHub release, verify the checksum, and copy the
+binary into `~/.local/bin` (Linux, macOS) or `%LOCALAPPDATA%\Programs\dotvault`
+(Windows) without elevated rights. CI runs them on Linux, macOS and Windows
+against a release assembled locally, including a tampered-checksum case, and
+`scripts/test-install-sh.sh` also checks platform detection and the exact release
+URLs. The download page in `site/` is published to GitHub Pages by
+`.github/workflows/pages.yml`; Pages needs a public repository on the free plan,
+so that job only runs when the repository is public.
 
 ## Not done yet
 

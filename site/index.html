@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dotvault</title>
+<meta name="description" content="Find, read, edit, store and share your .env files from one place. Install and download.">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0;
+    --code-bg: #f6f8fa; --accent: #0969da; --note-bg: #fff8c5; --note-line: #d4a72c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d;
+      --code-bg: #161b22; --accent: #4493f8; --note-bg: #272115; --note-line: #9e6a03;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1rem 3rem; }
+  h1 { margin: 0 0 .25rem; font-size: 1.9rem; }
+  h2 { margin: 2.2rem 0 .6rem; font-size: 1.25rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+  h3 { margin: 1.3rem 0 .4rem; font-size: 1rem; }
+  p { margin: .5rem 0; }
+  a { color: var(--accent); }
+  .tagline { color: var(--muted); margin: 0 0 1.2rem; }
+  .note {
+    background: var(--note-bg); border-left: 3px solid var(--note-line);
+    padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0;
+  }
+  code, pre { font: .875rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  :not(pre) > code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  .cmd { position: relative; margin: .4rem 0 .6rem; }
+  pre {
+    margin: 0; padding: .8rem 4.5rem .8rem .9rem; overflow-x: auto;
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .copy {
+    position: absolute; top: .45rem; right: .45rem; font: inherit; font-size: .8rem;
+    padding: .15rem .55rem; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 4px; cursor: pointer;
+  }
+  .copy:hover { border-color: var(--accent); }
+  section.platform { padding: .1rem .8rem .5rem; border: 1px solid transparent; border-radius: 6px; margin: 0 -.8rem; }
+  html[data-os="linux"] #linux, html[data-os="mac"] #mac, html[data-os="windows"] #windows {
+    border-color: var(--accent);
+  }
+  html[data-os="linux"] #linux h3::after, html[data-os="mac"] #mac h3::after, html[data-os="windows"] #windows h3::after {
+    content: "your system"; margin-left: .6rem; font-size: .75rem; font-weight: 400; color: var(--accent);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .small { color: var(--muted); font-size: .9rem; }
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>dotvault</h1>
+  <p class="tagline">Find, read, edit, store and share your <code>.env</code> files from one place.</p>
+
+  <p class="note"><strong>No release has been published yet.</strong> The commands and download links below start working once the first release exists. Until then, <a href="#source">build from source</a>.</p>
+
+  <h2 id="install">Install</h2>
+
+  <section class="platform" id="linux">
+    <h3>Linux</h3>
+    <div class="cmd"><pre><code>curl -fsSL https://yatharthkaushal.github.io/dotvault/install.sh | sh</code></pre></div>
+    <p class="small">x86_64 and aarch64 (glibc). Installs <code>dotvault</code> into <code>~/.local/bin</code>.</p>
+  </section>
+
+  <section class="platform" id="mac">
+    <h3>macOS</h3>
+    <div class="cmd"><pre><code>curl -fsSL https://yatharthkaushal.github.io/dotvault/install.sh | sh</code></pre></div>
+    <p class="small">Apple Silicon and Intel. Installs <code>dotvault</code> into <code>~/.local/bin</code>. The binaries are not signed; files fetched by this script are not quarantined by macOS.</p>
+  </section>
+
+  <section class="platform" id="windows">
+    <h3>Windows (PowerShell)</h3>
+    <div class="cmd"><pre><code>irm https://yatharthkaushal.github.io/dotvault/install.ps1 | iex</code></pre></div>
+    <p class="small">x64. Installs <code>dotvault.exe</code> into <code>%LOCALAPPDATA%\Programs\dotvault</code> and adds that folder to your user <code>PATH</code>. No administrator rights needed.</p>
+  </section>
+
+  <p>The scripts download the archive for your platform from GitHub Releases, check its SHA-256 checksum, and copy the binary into place. They never use <code>sudo</code>. Read them first: <a href="install.sh">install.sh</a>, <a href="install.ps1">install.ps1</a>.</p>
+
+  <h3>Options</h3>
+  <table>
+    <tr><th>Variable</th><th>Effect</th></tr>
+    <tr><td><code>DOTVAULT_VERSION</code></td><td>Install this release, for example <code>v0.1.0</code>. Default: latest.</td></tr>
+    <tr><td><code>DOTVAULT_INSTALL_DIR</code></td><td>Install into this folder.</td></tr>
+    <tr><td><code>DOTVAULT_NO_MODIFY_PATH</code></td><td>Windows only. Set to <code>1</code> to leave <code>PATH</code> alone.</td></tr>
+  </table>
+  <p>Set them on the <code>sh</code> side of the pipe:</p>
+  <div class="cmd"><pre><code>curl -fsSL https://yatharthkaushal.github.io/dotvault/install.sh | DOTVAULT_VERSION=v0.1.0 sh</code></pre></div>
+  <p>Windows: <code>$env:DOTVAULT_VERSION = "v0.1.0"</code> before running the installer. Run an installer again to update. To uninstall, delete the binary.</p>
+
+  <h2 id="download">Download</h2>
+  <p>Or download an archive yourself, extract it, and put <code>dotvault</code> on your <code>PATH</code>.</p>
+  <table>
+    <tr><th>Platform</th><th>File</th><th>Checksum</th></tr>
+    <tr><td>Linux x86_64</td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-unknown-linux-gnu.tar.xz">dotvault-x86_64-unknown-linux-gnu.tar.xz</a></td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-unknown-linux-gnu.tar.xz.sha256">sha256</a></td></tr>
+    <tr><td>Linux aarch64</td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-aarch64-unknown-linux-gnu.tar.xz">dotvault-aarch64-unknown-linux-gnu.tar.xz</a></td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-aarch64-unknown-linux-gnu.tar.xz.sha256">sha256</a></td></tr>
+    <tr><td>macOS Apple Silicon</td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-aarch64-apple-darwin.tar.xz">dotvault-aarch64-apple-darwin.tar.xz</a></td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-aarch64-apple-darwin.tar.xz.sha256">sha256</a></td></tr>
+    <tr><td>macOS Intel</td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-apple-darwin.tar.xz">dotvault-x86_64-apple-darwin.tar.xz</a></td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-apple-darwin.tar.xz.sha256">sha256</a></td></tr>
+    <tr><td>Windows x64</td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-pc-windows-msvc.zip">dotvault-x86_64-pc-windows-msvc.zip</a></td><td><a href="https://github.com/YatharthKaushal/dotvault/releases/latest/download/dotvault-x86_64-pc-windows-msvc.zip.sha256">sha256</a></td></tr>
+  </table>
+  <p class="small">The Linux builds need glibc; on Alpine, build from source. All releases are listed on the <a href="https://github.com/YatharthKaushal/dotvault/releases">releases page</a>.</p>
+
+  <h2 id="source">Build from source</h2>
+  <p>Needs <a href="https://rustup.rs/">Rust</a> 1.85 or newer and a C compiler (Linux: <code>build-essential</code> or <code>gcc</code>; macOS: Xcode Command Line Tools; Windows: Visual Studio C++ Build Tools).</p>
+  <div class="cmd"><pre><code>git clone https://github.com/YatharthKaushal/dotvault.git
+cd dotvault
+cargo install --path crates/dotvault-cli --locked</code></pre></div>
+  <p class="small">This puts <code>dotvault</code> in <code>~/.cargo/bin</code> (<code>%USERPROFILE%\.cargo\bin</code> on Windows).</p>
+
+  <h2 id="more">More</h2>
+  <p>
+    <a href="https://github.com/YatharthKaushal/dotvault#readme">Documentation</a> ·
+    <a href="https://github.com/YatharthKaushal/dotvault">Source</a> ·
+    <a href="https://github.com/YatharthKaushal/dotvault/blob/main/docs/security-model.md">Security model</a> ·
+    <a href="https://github.com/YatharthKaushal/dotvault/blob/main/SECURITY.md">Report a vulnerability</a>
+  </p>
+
+  <footer>Licensed under MIT or Apache-2.0, at your option.</footer>
+</main>
+<script>
+(function () {
+  var ua = navigator.userAgent || "";
+  var os = /Windows/i.test(ua) ? "windows" : /Macintosh|Mac OS X/i.test(ua) ? "mac" : /Linux|X11/i.test(ua) && !/Android/i.test(ua) ? "linux" : "";
+  if (os) document.documentElement.setAttribute("data-os", os);
+
+  var blocks = document.querySelectorAll(".cmd");
+  Array.prototype.forEach.call(blocks, function (block) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy";
+    button.textContent = "Copy";
+    button.addEventListener("click", function () {
+      var text = block.querySelector("code").textContent;
+      var done = function (ok) {
+        button.textContent = ok ? "Copied" : "Press Ctrl+C";
+        setTimeout(function () { button.textContent = "Copy"; }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      } else {
+        done(false);
+      }
+    });
+    block.appendChild(button);
+  });
+})();
+</script>
+</body>
+</html>
