@@ -1,0 +1,104 @@
+name: Bug report
+description: Something in dotvault doesn't work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        dotvault is in early development. Please check the
+        [Features](https://github.com/YatharthKaushal/dotvault#features) list and
+        the [Troubleshooting](https://github.com/YatharthKaushal/dotvault#troubleshooting)
+        section before filing.
+
+        **Do not paste real secrets, share links, share codes, session tokens or
+        recovery keys** — anyone who sees them can use them. Use throwaway values.
+        For a security problem, use the
+        [private security advisory form](https://github.com/YatharthKaushal/dotvault/security/advisories/new) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands you ran, with any secret values replaced.
+      placeholder: |
+        1. dotvault scan ~/code
+        2. dotvault ls -p api
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - CLI — local commands (scan, ls, show, find, set, ...)
+        - CLI — vault (push, pull, vault)
+        - CLI — sharing (share, open, shares)
+        - CLI — account (register, login, recover, ...)
+        - Server
+        - Install / packaging
+        - Documentation
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: "Ubuntu 24.04 / macOS 15.2 / Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: dotvault version
+      description: Output of `dotvault --version` (or the commit, for a source build — `git rev-parse --short HEAD`).
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Built from source (cargo install)
+        - Installer script
+        - Downloaded archive
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: toolchain
+    attributes:
+      label: Toolchain version
+      description: For source builds, the output of `rustc --version`.
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: The command output, with secrets removed.
+      render: text

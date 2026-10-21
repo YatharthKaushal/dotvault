@@ -186,5 +186,6 @@ non-UTF-8 files are refused rather than corrupted.
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for a security problem; contact the
-maintainers privately first.
+Please don't open a public issue for a security problem. Follow the
+[Security Policy](../SECURITY.md): report it privately through a GitHub Security
+Advisory or by email.
