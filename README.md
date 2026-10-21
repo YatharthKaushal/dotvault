@@ -17,9 +17,9 @@ variables through a link or short code. An account is only needed for the cloud
 features.
 
 > [!NOTE]
-> Early development. The test suite passes in CI on Linux, macOS and Windows,
-> but there is no published release yet and the cryptographic design has not
-> been independently reviewed. See [Security](#security).
+> Early development (v0.1.0). The test suite passes in CI on Linux, macOS and
+> Windows, but the cryptographic design has not been independently reviewed. See
+> [Security](#security).
 
 ## Features
 
@@ -42,10 +42,7 @@ features.
 
 ## Install
 
-> [!IMPORTANT]
-> There is no published release yet, so the install scripts report that they
-> cannot download anything until the first release exists. Until then,
-> [build from source](#from-source).
+The latest release is [v0.1.0](https://github.com/YatharthKaushal/dotvault/releases/latest).
 
 **Linux and macOS** (x86_64 and aarch64; Linux needs glibc 2.34 or newer):
 

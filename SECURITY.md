@@ -2,12 +2,13 @@
 
 ## Supported versions
 
-dotvault is in early development and has no released versions. Only the `main`
-branch is supported.
+dotvault is in early development. Fixes go into `main` and ship in the next
+release; only the latest release is supported.
 
 | Version | Supported |
 | :--- | :--- |
 | `main` | Yes |
+| Latest release (0.1.x) | Yes |
 | Everything else | No |
 
 ## Reporting a vulnerability
