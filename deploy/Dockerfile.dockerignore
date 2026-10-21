@@ -1,0 +1,12 @@
+# Keeps the build context small (BuildKit reads <Dockerfile>.dockerignore).
+target
+.git
+.github
+**/*.db
+**/*.db-shm
+**/*.db-wal
+.env
+.env.*
+docs
+packaging
+web

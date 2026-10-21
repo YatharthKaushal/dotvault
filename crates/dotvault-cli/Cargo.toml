@@ -1,0 +1,39 @@
+[package]
+name = "dotvault"
+description = "Find, view, edit, store and share .env files from one place"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dotvault"
+path = "src/main.rs"
+
+[dependencies]
+anstream = "1.0.0"
+anyhow = "1.0.104"
+base64 = "0.23.1"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+clap_complete = "4.6.11"
+directories = "6.0.0"
+dotvault-core.workspace = true
+globset = "0.4.19"
+ignore = "0.4.30"
+owo-colors = "4.4.0"
+rpassword = "7.5.4"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+toml = "1.1.8"
+unicode-width = "0.2.2"
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+zeroize = "1.9.1"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+dotvault-server = { path = "../dotvault-server" }
+predicates = "3.1.4"
+tempfile = "3.27.0"
+tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros"] }

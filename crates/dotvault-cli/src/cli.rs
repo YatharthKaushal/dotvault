@@ -1,0 +1,436 @@
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
+
+use crate::filter::FilterArgs;
+use crate::output::Format;
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "dotvault",
+    version,
+    about = "Find, view, edit, store and share your .env files from one place",
+    propagate_version = true,
+    arg_required_else_help = true
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Find env files under folders and remember those folders
+    Scan(ScanArgs),
+    /// Manage the folders that are searched
+    Roots {
+        #[command(subcommand)]
+        command: RootsCommand,
+    },
+    /// List env files (examples are hidden unless asked for)
+    #[command(visible_alias = "list")]
+    Ls(LsArgs),
+    /// Show the variables of one env file (values are masked unless --reveal)
+    Show(ShowArgs),
+    /// Find a variable across every env file
+    Find(FindArgs),
+    /// Print the value of one variable
+    Get(GetArgs),
+    /// Set variables, keeping the rest of the file untouched
+    Set(SetArgs),
+    /// Remove variables
+    Unset(UnsetArgs),
+    /// Open an env file in $VISUAL / $EDITOR
+    Edit(EditArgs),
+    /// Compare two env files (exit code 1 if they differ)
+    Diff(DiffArgs),
+    /// Show where dotvault keeps its config and settings
+    Config,
+    /// Create an account on a dotvault server
+    Register(RegisterArgs),
+    /// Log in to a dotvault server
+    Login(LoginArgs),
+    /// Log out and forget the saved session
+    Logout,
+    /// Show who you are logged in as
+    Whoami,
+    /// Change your password
+    Passwd,
+    /// Get back into your account with the recovery key
+    Recover(RecoverArgs),
+    /// Store an env file in your encrypted cloud vault
+    Push(PushArgs),
+    /// Fetch an env file from your cloud vault
+    Pull(PullArgs),
+    /// Browse your cloud vault
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+    /// Create a link/code that gives someone access to chosen variables
+    Share(ShareArgs),
+    /// Open a share link or code someone sent you
+    Open(OpenArgs),
+    /// Manage the shares you created
+    Shares {
+        #[command(subcommand)]
+        command: SharesCommand,
+    },
+    /// Print a shell completion script
+    Completions {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+}
+
+#[derive(Args, Debug)]
+pub struct ScanArgs {
+    /// Folders to search and remember (default: the folders already remembered)
+    pub paths: Vec<PathBuf>,
+    /// How many directory levels to descend
+    #[arg(long, value_name = "N")]
+    pub depth: Option<usize>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RootsCommand {
+    /// Remember folders without scanning them yet
+    Add { paths: Vec<PathBuf> },
+    /// Forget folders
+    Rm { paths: Vec<PathBuf> },
+    /// List the remembered folders
+    Ls,
+}
+
+#[derive(Args, Debug)]
+pub struct LsArgs {
+    /// Only files inside this folder
+    pub folder: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    /// Only files that define this variable (exact name or glob, repeatable)
+    #[arg(short = 'k', long = "has-key", value_name = "KEY")]
+    pub has_key: Vec<String>,
+
+    /// Print only file paths, one per line
+    #[arg(long, conflicts_with = "json")]
+    pub paths: bool,
+
+    /// Machine-readable output (key names are included, values never)
+    #[arg(long)]
+    pub json: bool,
+
+    /// Rescan the remembered folders first
+    #[arg(long)]
+    pub refresh: bool,
+}
+
+/// How to pick a single env file. Without any of these, `./.env` is used.
+#[derive(Args, Debug, Default, Clone)]
+pub struct TargetFlags {
+    /// Path to an env file
+    #[arg(short, long, value_name = "PATH", conflicts_with_all = ["project", "env"])]
+    pub file: Option<PathBuf>,
+
+    /// Project name (see `dotvault ls`)
+    #[arg(short, long, value_name = "NAME")]
+    pub project: Option<String>,
+
+    /// Environment of the project: default, local, production, ...
+    #[arg(short, long, value_name = "ENV", requires = "project")]
+    pub env: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct ShowArgs {
+    /// A path, `project` or `project:env` (default: ./.env)
+    pub target: Option<String>,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+
+    /// Only these variables (comma separated)
+    #[arg(short, long, value_delimiter = ',', value_name = "KEYS")]
+    pub keys: Vec<String>,
+
+    /// Print real values instead of masks
+    #[arg(long)]
+    pub reveal: bool,
+
+    #[arg(long, value_enum, default_value = "table")]
+    pub format: Format,
+
+    /// Let a bare `project` selector resolve to an example file
+    #[arg(long)]
+    pub examples: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct FindArgs {
+    /// Variable name or glob, e.g. DATABASE_URL or 'AWS_*'
+    pub pattern: String,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    /// Print real values instead of masks
+    #[arg(long)]
+    pub reveal: bool,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct GetArgs {
+    pub key: String,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct SetArgs {
+    /// KEY=VALUE pairs. A bare KEY prompts for the value so it stays out of shell history.
+    #[arg(required = true, value_name = "KEY[=VALUE]")]
+    pub assignments: Vec<String>,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct UnsetArgs {
+    #[arg(required = true)]
+    pub keys: Vec<String>,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct EditArgs {
+    /// A path, `project` or `project:env` (default: ./.env)
+    pub target: Option<String>,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct DiffArgs {
+    /// A path, `project` or `project:env`
+    pub left: String,
+    /// A path, `project` or `project:env`
+    pub right: String,
+
+    /// Show real values for changed variables
+    #[arg(long)]
+    pub reveal: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RegisterArgs {
+    /// Server to register on (default: the one in your config)
+    #[arg(long, value_name = "URL", env = "DOTVAULT_SERVER")]
+    pub server: Option<String>,
+    #[arg(short, long)]
+    pub username: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct LoginArgs {
+    /// Server to log in to (default: the one in your config or last session)
+    #[arg(long, value_name = "URL", env = "DOTVAULT_SERVER")]
+    pub server: Option<String>,
+    #[arg(short, long)]
+    pub username: Option<String>,
+    /// Do not keep the vault key on disk; vault commands will ask for the password instead
+    #[arg(long)]
+    pub no_cache_key: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RecoverArgs {
+    #[arg(long, value_name = "URL", env = "DOTVAULT_SERVER")]
+    pub server: Option<String>,
+    #[arg(short, long)]
+    pub username: Option<String>,
+    /// Do not keep the vault key on disk
+    #[arg(long)]
+    pub no_cache_key: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct PushArgs {
+    /// A path, `project` or `project:env` (default: ./.env)
+    pub target: Option<String>,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+
+    /// Name in the vault (default: project/env, e.g. acme-api/production)
+    #[arg(short, long)]
+    pub name: Option<String>,
+
+    /// Only these variables (comma separated)
+    #[arg(short, long, value_delimiter = ',', value_name = "KEYS")]
+    pub keys: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct PullArgs {
+    /// Vault item name (see `dotvault vault ls`)
+    pub name: String,
+
+    /// Write to this file
+    #[arg(short, long, value_name = "PATH", conflicts_with = "stdout")]
+    pub out: Option<PathBuf>,
+
+    /// Print the variables instead of writing a file
+    #[arg(long)]
+    pub stdout: bool,
+
+    /// Replace the file if it exists
+    #[arg(long, requires = "out", conflicts_with = "merge")]
+    pub force: bool,
+
+    /// Add to the file if it exists, keeping its comments and other variables
+    #[arg(long, requires = "out")]
+    pub merge: bool,
+
+    /// Only these variables (comma separated)
+    #[arg(short, long, value_delimiter = ',', value_name = "KEYS")]
+    pub keys: Vec<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum VaultCommand {
+    /// List your vault items
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show an item's variables (masked unless --reveal)
+    Show {
+        name: String,
+        #[arg(long)]
+        reveal: bool,
+        #[arg(long, value_enum, default_value = "table")]
+        format: Format,
+        #[arg(short, long, value_delimiter = ',', value_name = "KEYS")]
+        keys: Vec<String>,
+    },
+    /// Delete an item
+    Rm {
+        name: String,
+        /// Do not ask for confirmation
+        #[arg(short, long)]
+        yes: bool,
+    },
+}
+
+#[derive(Args, Debug)]
+pub struct ShareArgs {
+    /// A path, `project` or `project:env` (default: ./.env)
+    #[arg(conflicts_with = "vault")]
+    pub target: Option<String>,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+
+    /// Share a vault item instead of a local file
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["file", "project"])]
+    pub vault: Option<String>,
+
+    /// Only these variables (comma separated)
+    #[arg(
+        short,
+        long,
+        value_delimiter = ',',
+        value_name = "KEYS",
+        conflicts_with = "interactive"
+    )]
+    pub keys: Vec<String>,
+
+    /// Pick the variables from a list
+    #[arg(short, long)]
+    pub interactive: bool,
+
+    /// How long the share works: 30m, 24h, 7d (max 30d)
+    #[arg(long, default_value = "24h", value_name = "TIME")]
+    pub expires: String,
+
+    /// Stop working after this many opens
+    #[arg(long, value_name = "N")]
+    pub max_views: Option<u32>,
+
+    /// A message the recipient sees
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct OpenArgs {
+    /// The link or code you were sent
+    pub share: String,
+
+    /// Print the variables (real values)
+    #[arg(long)]
+    pub reveal: bool,
+
+    #[arg(long, value_enum, default_value = "table", requires = "reveal")]
+    pub format: Format,
+
+    /// Write the variables to this file
+    #[arg(short, long, value_name = "PATH")]
+    pub write: Option<PathBuf>,
+
+    /// Replace the file if it exists
+    #[arg(long, requires = "write", conflicts_with = "merge")]
+    pub force: bool,
+
+    /// Add to the file if it exists, keeping its comments and other variables
+    #[arg(long, requires = "write")]
+    pub merge: bool,
+
+    /// Keep a copy in your own vault, optionally under NAME
+    #[arg(long, value_name = "NAME", num_args = 0..=1)]
+    pub save: Option<Option<String>>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SharesCommand {
+    /// List the shares you created
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
+    /// See who opened or saved a share
+    Log {
+        /// Share id (a unique prefix is enough)
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop a share from working
+    Revoke {
+        /// Share id (a unique prefix is enough)
+        id: String,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+
+    /// Catches duplicate argument ids and similar mistakes that clap would
+    /// otherwise only report as a panic when the command runs.
+    #[test]
+    fn command_definition_is_valid() {
+        super::Cli::command().debug_assert();
+    }
+}

@@ -1,0 +1,34 @@
+[package]
+name = "dotvault-server"
+description = "dotvault sync and sharing server (stores ciphertext only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Shipped as a container image (deploy/Dockerfile), not as a release archive.
+[package.metadata.dist]
+dist = false
+
+[dependencies]
+axum = "0.8.9"
+base64 = "0.23.1"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+dotvault-core.workspace = true
+hmac = "0.13.0"
+log = "0.4.34"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.11.0"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+subtle = "2.6.1"
+thiserror.workspace = true
+tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["set-header"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

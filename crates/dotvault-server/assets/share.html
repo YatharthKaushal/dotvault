@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>dotvault - someone shared secrets with you</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f5f1;
+    --fg: #1d1c1a;
+    --muted: #6a675f;
+    --card: #ffffff;
+    --line: #dedbd2;
+    --accent: #1f6f5c;
+    --accent-fg: #ffffff;
+    --code-bg: #14211d;
+    --code-fg: #d8f3e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121413;
+      --fg: #ecebe6;
+      --muted: #9a978d;
+      --card: #1b1d1c;
+      --line: #2e312f;
+      --accent: #46c2a0;
+      --accent-fg: #07130f;
+      --code-bg: #0b0f0e;
+      --code-fg: #c9f0e0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 40rem; margin: 0 auto; padding: 2.5rem 1rem 4rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+  h2 { font-size: 1rem; margin: 2rem 0 .5rem; }
+  p { margin: .5rem 0; }
+  .brand { font-weight: 700; color: var(--accent); letter-spacing: .02em; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    margin-top: 1.25rem;
+  }
+  pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre.cmd {
+    margin: .5rem 0;
+    padding: .8rem .9rem;
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border-radius: 8px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: .85rem;
+  }
+  button {
+    font: inherit;
+    font-weight: 600;
+    padding: .5rem 1rem;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    cursor: pointer;
+  }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .hidden { display: none; }
+  .warn { color: #b3261e; }
+  @media (prefers-color-scheme: dark) { .warn { color: #ff8a80; } }
+  ul.install { padding-left: 1.1rem; margin: .4rem 0; }
+  ul.install li { margin: .25rem 0; }
+</style>
+</head>
+<body>
+<main>
+  <p class="brand">dotvault</p>
+  <h1>Someone shared secrets with you</h1>
+  <p class="muted">
+    This link carries an end-to-end encrypted bundle of environment variables.
+    The decryption key lives only in the part of the link after the <code>#</code>;
+    your browser never sends it to this server.
+  </p>
+
+  <section class="card" id="ready" aria-live="polite">
+    <p>Run this in your terminal (you need a dotvault account to open it):</p>
+    <pre class="cmd" id="cmd"></pre>
+    <button type="button" id="copy">Copy command</button>
+    <span class="muted" id="copied" role="status"></span>
+    <p class="muted" id="alt-wrap">
+      Using a different server than your CLI default? Open the full link instead:
+    </p>
+    <pre class="cmd" id="alt"></pre>
+  </section>
+
+  <section class="card hidden" id="problem" aria-live="polite">
+    <p class="warn" id="problem-text"></p>
+  </section>
+
+  <noscript>
+    <section class="card">
+      <p>
+        JavaScript is needed to build the command for you. Without it, take the part of the
+        address after <code>/s/</code> as the id and the part after <code>#</code> as the key,
+        and run <code>dotvault open dv1.&lt;id&gt;.&lt;key&gt;</code>.
+      </p>
+    </section>
+  </noscript>
+
+  <h2>Don't have dotvault yet?</h2>
+  <ul class="install">
+    <li>macOS / Linux (Homebrew): <code>brew install dotvault</code></li>
+    <li>Windows (Scoop): <code>scoop install dotvault</code></li>
+    <li>Any Unix: <code>curl -fsSL https://example.com/dotvault/install.sh | sh</code></li>
+  </ul>
+  <p class="muted">Then create an account with <code>dotvault register</code> and run the command above.</p>
+  <!--SERVER_NOTE-->
+</main>
+<script src="/assets/share.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Litestream template: continuous replication of the SQLite database to
+# S3-compatible storage. Run it as a sidecar that mounts the same /data volume:
+#
+#   litestream replicate -config /etc/litestream.yml
+#
+# Restore with:  litestream restore -config /etc/litestream.yml /data/dotvault.db
+# Not exercised by CI; see docs/deploy.md.
+
+dbs:
+  - path: /data/dotvault.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: dotvault
+        # endpoint: ${LITESTREAM_ENDPOINT}   # for non-AWS providers
+        # credentials come from LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY

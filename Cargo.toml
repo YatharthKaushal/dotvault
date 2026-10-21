@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dotvault-core",
+    "crates/dotvault-cli",
+    "crates/dotvault-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/YatharthKaushal/dotvault"
+rust-version = "1.85"
+
+[workspace.dependencies]
+dotvault-core = { path = "crates/dotvault-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3
+
+# Dependencies are optimized for size: that takes the CLI from 6.4 MB to 4.8 MB
+# at a measured cost of 0-10% (login with Argon2: ~280 ms -> ~290 ms; `ls` from the
+# index: ~11 ms -> ~11 ms). Our own crates stay at opt-level 3.
+[profile.release.package."*"]
+opt-level = "s"
+
+# Argon2 and friends are unusably slow unoptimized, which makes tests crawl.
+[profile.dev.package."*"]
+opt-level = 3
+
+# cargo-dist builds with this profile
+[profile.dist]
+inherits = "release"
