@@ -35,10 +35,8 @@ pub fn parse_target(text: &str) -> Target {
 
 pub fn expand_tilde(text: &str) -> PathBuf {
     if text == "~" || text.starts_with("~/") || text.starts_with("~\\") {
-        if let Some(dirs) = directories::BaseDirs::new() {
-            return dirs
-                .home_dir()
-                .join(text[1..].trim_start_matches(['/', '\\']));
+        if let Some(home) = crate::discover::home_dir() {
+            return home.join(text[1..].trim_start_matches(['/', '\\']));
         }
     }
     PathBuf::from(text)

@@ -23,8 +23,8 @@ features.
 
 ## Features
 
-- Finds every `.env` and `.env.*` across your project folders, grouped by
-  project and environment.
+- Finds every `.env` and `.env.*` on your machine with no setup (it starts in
+  your home folder), grouped by project and environment.
 - Filters by project, environment, path or variable. Example files
   (`.env.example` and the like) are hidden unless you ask for them.
 - Searches a variable across all files and shows which environments disagree.
@@ -165,8 +165,9 @@ is used. The environment is the part of the file name after `.env.`, so
 Local, no account:
 
 ```bash
-dotvault scan ~/code                      # find env files and remember the folder
-dotvault ls                               # list them, grouped by project
+dotvault ls                               # every env file under your home folder, grouped by project
+dotvault scan ~/code                      # look only in a folder you name
+dotvault scan --system                    # look on the whole machine (servers, /srv, /var/www)
 dotvault ls -p acme -e production         # filter
 dotvault show acme-api:production         # values are masked
 dotvault show acme-api:production --reveal --keys DATABASE_URL
@@ -177,6 +178,31 @@ dotvault set SECRET                       # prompts, so it stays out of shell hi
 dotvault unset OLD_KEY -f ./.env
 dotvault edit acme-api:local              # opens $VISUAL / $EDITOR
 ```
+
+### Where dotvault looks
+
+The first command that needs the list of env files searches your home folder and
+remembers it, so there is nothing to set up. `dotvault roots` shows and changes
+the remembered folders.
+
+- `dotvault scan ~/code` adds a folder, for projects outside your home folder. As
+  your very first command it keeps the search to just that folder.
+- `dotvault scan --system` adds the whole machine: `/` on Linux and macOS, the
+  system drive on Windows (other drives: `dotvault scan D:\`). Use it on servers,
+  where projects live in `/srv`, `/var/www` or `/opt`. It prints how long it took.
+- Skipped: hidden folders directly inside any home folder (`~/.config`,
+  `~/.cache`), `Library`, `AppData` and media folders, `node_modules`, `.git`,
+  `target` and similar, operating system folders (`/proc`, `/usr`, `/etc`,
+  `C:\Windows`, `Program Files`), backup snapshots, and network or FUSE mounts.
+  Name a folder yourself to search inside it anyway: `dotvault scan ~/.work`.
+- Your home folder is never treated as a project, even if it holds a `.git` for
+  dotfiles, so its files are named after their own folder.
+- `roots rm` sticks while another folder remains. Removing the last one makes the
+  next `ls` search your home folder again.
+- A command given a path (`show ./.env`) never starts a search.
+- macOS may ask your terminal for permission to read Documents, Desktop and
+  Downloads. Under WSL, Windows drives are under `/mnt/c`, which `--system`
+  skips, so name them: `dotvault scan /mnt/c/Users/you`.
 
 Cloud vault:
 
@@ -219,7 +245,7 @@ dotvault shares revoke <id>
 
 | Command | Description |
 | :--- | :--- |
-| `scan [PATHS] [--depth N]` | Search folders for env files and remember them. With no paths, rescans the remembered folders. |
+| `scan [PATHS] [--system] [--depth N]` | Search folders for env files and remember them. With no paths, rescans the remembered folders (your home folder on first use). `--system` adds the whole machine. |
 | `roots add\|rm\|ls` | Manage the remembered folders. |
 | `ls [FOLDER]` | List env files. Filters: `-p/--project`, `-e/--env`, `--path`, `-k/--has-key`, `--examples`, `--only-examples`. Output: `--paths`, `--json`. `--refresh` rescans first. |
 | `show [TARGET]` | Show a file's variables. `--reveal`, `--keys A,B`, `--format table\|dotenv\|json\|shell\|powershell`. |
@@ -271,7 +297,7 @@ refreshes itself; run `dotvault scan` to pick up new folders and
 ```toml
 # config.toml
 server = "https://dotvault.synquic.tech"   # saved on your first register or login
-roots = ["/home/you/code"]             # managed by `scan` and `roots`
+roots = ["/home/you"]                  # your home folder at first; managed by `scan` and `roots`
 max_depth = 10
 auto_scan_secs = 600                   # rescan when the index is older than this
 ignore = ["playground"]                # extra folder names to skip
@@ -287,6 +313,7 @@ folders are always skipped.
 | `DOTVAULT_USERNAME`, `DOTVAULT_PASSWORD` | Non-interactive login or registration. |
 | `DOTVAULT_NEW_PASSWORD`, `DOTVAULT_RECOVERY_KEY` | Non-interactive `passwd` and `recover`. |
 | `DOTVAULT_TOKEN` | A session token for scripts, with `DOTVAULT_SERVER`. It can share and open but has no vault key. |
+| `DOTVAULT_HOME` | Home folder to search and to shorten to `~`, for containers and tests. |
 | `VISUAL`, `EDITOR` | The editor for `edit`. |
 | `NO_COLOR` | Disable colors. |
 

@@ -11,16 +11,21 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{anyhow, bail, Context, Result};
+use owo_colors::OwoColorize;
 
 use crate::cli::{Cli, Command, TargetFlags};
 use crate::config::{Config, Dirs};
+use crate::discover;
 use crate::index::{FileRecord, Index};
-use crate::output::{now_secs, tilde};
+use crate::output::{humanize_secs, now_secs, tilde};
 use crate::resolve::{self, parse_target, Target};
 use crate::scan::{self, ScanOptions, ScanOutcome};
 
 pub fn run(cli: Cli) -> Result<ExitCode> {
     let mut ctx = Ctx::load()?;
+    if cli.command.needs_index() {
+        ctx.bootstrap_roots()?;
+    }
     match cli.command {
         Command::Scan(a) => ls::scan(&mut ctx, a),
         Command::Roots { command } => ls::roots(&mut ctx, command),
@@ -54,6 +59,38 @@ pub fn run(cli: Cli) -> Result<ExitCode> {
     }
 }
 
+impl Command {
+    /// Whether the command looks things up in the list of env files, so that a
+    /// first run must have folders to look in. Commands given a path never do,
+    /// so scripts and CI never trigger a scan they did not ask for.
+    fn needs_index(&self) -> bool {
+        match self {
+            Command::Ls(_) | Command::Find(_) => true,
+            Command::Show(a) => selects_project(a.target.as_deref(), &a.flags),
+            Command::Get(a) => selects_project(None, &a.flags),
+            Command::Set(a) => selects_project(None, &a.flags),
+            Command::Unset(a) => selects_project(None, &a.flags),
+            Command::Edit(a) => selects_project(a.target.as_deref(), &a.flags),
+            Command::Push(a) => selects_project(a.target.as_deref(), &a.flags),
+            Command::Share(a) => {
+                a.vault.is_none() && selects_project(a.target.as_deref(), &a.flags)
+            }
+            Command::Diff(a) => is_project_selector(&a.left) || is_project_selector(&a.right),
+            _ => false,
+        }
+    }
+}
+
+fn is_project_selector(text: &str) -> bool {
+    matches!(parse_target(text), Target::Project { .. })
+}
+
+/// Whether a command's target is a project name (`acme`, `acme:prod`, `-p acme`)
+/// and not a file path.
+fn selects_project(positional: Option<&str>, flags: &TargetFlags) -> bool {
+    flags.project.is_some() || positional.is_some_and(is_project_selector)
+}
+
 pub struct Ctx {
     pub dirs: Dirs,
     pub config: Config,
@@ -70,10 +107,36 @@ impl Ctx {
         Index::open(&self.dirs.index_file())
     }
 
+    /// With no folders configured, starts with the home folder, so a first
+    /// `dotvault ls` works without setup. Only ever acts when the list is empty;
+    /// returns whether it added anything.
+    fn bootstrap_roots(&mut self) -> Result<bool> {
+        if !self.config.roots.is_empty() {
+            return Ok(false);
+        }
+        let roots = discover::default_roots();
+        if roots.is_empty() {
+            return Ok(false);
+        }
+        self.config.roots = roots;
+        self.config.save(&self.dirs)?;
+        anstream::eprintln!(
+            "{}",
+            "No folders set up yet, so scanning your home folder. Change it with `dotvault roots`."
+                .dimmed()
+        );
+        Ok(true)
+    }
+
     /// Scans the remembered folders and stores the result in the index.
     fn rescan(&self, index: &mut Index, depth: Option<usize>) -> Result<ScanOutcome> {
         let outcome = scan::scan(&ScanOptions::from_config(&self.config, depth));
-        index.replace_all(&outcome.records, &self.config.scan_signature(), now_secs())?;
+        index.replace_all(
+            &outcome.records,
+            &self.config.scan_signature(),
+            now_secs(),
+            outcome.elapsed.as_millis() as u64,
+        )?;
         Ok(outcome)
     }
 
@@ -83,14 +146,28 @@ impl Ctx {
     fn records(&self, force: bool) -> Result<Vec<FileRecord>> {
         let mut index = self.open_index()?;
         if !self.config.roots.is_empty() {
-            let age_limit = self.config.auto_scan_secs as i64;
+            let gap = rescan_gap_secs(self.config.auto_scan_secs, index.last_scan_millis()?);
             let stale = force
                 || index.signature()?.as_deref() != Some(self.config.scan_signature().as_str())
                 || index
                     .last_scan()?
-                    .is_none_or(|t| now_secs() - t > age_limit);
+                    .is_none_or(|t| now_secs() - t > gap as i64);
             if stale {
-                self.rescan(&mut index, None)?;
+                let outcome = self.rescan(&mut index, None)?;
+                if outcome.elapsed.as_secs_f64() > 2.0 {
+                    anstream::eprintln!(
+                        "{}",
+                        format!(
+                            "Refreshed the env file list in {:.1}s. A scan this slow is repeated at most every {} (see auto_scan_secs in the config).",
+                            outcome.elapsed.as_secs_f64(),
+                            humanize_secs(rescan_gap_secs(
+                                self.config.auto_scan_secs,
+                                Some(outcome.elapsed.as_millis() as u64),
+                            ))
+                        )
+                        .dimmed()
+                    );
+                }
             }
         }
         let records = index.all()?;
@@ -105,6 +182,14 @@ impl Ctx {
             }
         }
     }
+}
+
+/// How old the list may get before it is refreshed on its own: the configured
+/// interval, stretched to 50 times the last scan's duration so a slow scan (the
+/// whole machine) costs about 2% of the time at most.
+fn rescan_gap_secs(auto_scan_secs: u64, last_scan_millis: Option<u64>) -> u64 {
+    let slow = (last_scan_millis.unwrap_or(0) / 1000).saturating_mul(50);
+    auto_scan_secs.max(slow)
 }
 
 pub struct ResolveOpts {
@@ -155,7 +240,7 @@ pub fn resolve_target(
         }
         Target::Project { name, env } => {
             if ctx.config.roots.is_empty() {
-                bail!("no folders are being scanned yet; run `dotvault scan <dir>` first, or pass a file path");
+                bail!("no folders are being scanned and your home folder could not be found; run `dotvault scan <dir>` first, or pass a file path");
             }
             let records = ctx.records(false)?;
             let rec = resolve::pick(&records, &name, env.as_deref(), opts.include_examples)?;
@@ -173,5 +258,83 @@ pub fn read_text(path: &Path, strict: bool) -> Result<String> {
             .map_err(|_| anyhow!("{} is not valid UTF-8; refusing to modify it", tilde(path)))
     } else {
         Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn needs_index(args: &[&str]) -> bool {
+        let mut full = vec!["dotvault"];
+        full.extend_from_slice(args);
+        Cli::try_parse_from(full).unwrap().command.needs_index()
+    }
+
+    #[test]
+    fn commands_that_look_things_up_need_the_list_of_env_files() {
+        for args in [
+            &["ls"][..],
+            &["find", "API_KEY"],
+            &["show", "acme"],
+            &["show", "acme:production"],
+            &["show", "-p", "acme"],
+            &["get", "KEY", "-p", "acme", "-e", "prod"],
+            &["set", "A=1", "-p", "acme"],
+            &["unset", "A", "-p", "acme"],
+            &["edit", "acme"],
+            &["push", "acme:prod"],
+            &["share", "acme", "--keys", "A"],
+            &["diff", "./.env", "acme"],
+            &["diff", "acme", "acme:production"],
+        ] {
+            assert!(needs_index(args), "{args:?} should need the list");
+        }
+    }
+
+    #[test]
+    fn commands_given_a_path_or_nothing_to_look_up_do_not() {
+        for args in [
+            &["show"][..],
+            &["show", "./.env"],
+            &["show", "dir/.env.local"],
+            &["show", "-f", "x/.env"],
+            &["get", "KEY"],
+            &["get", "KEY", "-f", "x/.env"],
+            &["set", "A=1"],
+            &["push", "./.env"],
+            &["share", "--vault", "acme/prod"],
+            &["share", "--vault", "acme", "--keys", "A"],
+            &["diff", "./a.env", "./b.env"],
+            &["scan"],
+            &["roots", "ls"],
+            &["config"],
+            &["whoami"],
+            &["login"],
+            &["vault", "ls"],
+            &[
+                "open",
+                "dv1.aaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "--reveal",
+            ],
+            &["completions", "bash"],
+        ] {
+            assert!(!needs_index(args), "{args:?} must not trigger a scan");
+        }
+    }
+
+    #[test]
+    fn a_slow_scan_is_repeated_less_often() {
+        // fast scans keep the configured interval
+        assert_eq!(rescan_gap_secs(600, None), 600);
+        assert_eq!(rescan_gap_secs(600, Some(900)), 600);
+        assert_eq!(rescan_gap_secs(600, Some(11_000)), 600);
+        // 26 s (the whole machine) is spaced to 50x
+        assert_eq!(rescan_gap_secs(600, Some(26_000)), 1300);
+        assert_eq!(rescan_gap_secs(600, Some(120_000)), 6000);
+        // a larger configured interval is never shortened
+        assert_eq!(rescan_gap_secs(86_400, Some(26_000)), 86_400);
+        assert_eq!(rescan_gap_secs(0, Some(2_000)), 100);
     }
 }

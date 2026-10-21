@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -11,17 +10,27 @@ use serde::Serialize;
 
 use super::Ctx;
 use crate::cli::{LsArgs, RootsCommand, ScanArgs};
+use crate::discover;
 use crate::filter::{Filter, FilterArgs};
 use crate::index::FileRecord;
 use crate::output::{age, now_secs, plural, print_json, stdout, tilde, Cell, Style, Table};
 
-const FIRST_RUN_HINT: &str = "No folders are being scanned yet. Point dotvault at the folder that holds your projects:\n\n  dotvault scan ~/code\n";
+const FIRST_RUN_HINT: &str = "No folders are being scanned and your home folder could not be found. Point dotvault at the folder that holds your projects:\n\n  dotvault scan ~/code\n";
 
 pub fn scan(ctx: &mut Ctx, args: ScanArgs) -> Result<ExitCode> {
+    if args.system {
+        add_roots(ctx, &discover::system_roots())?;
+        anstream::eprintln!(
+            "{}",
+            "Searching the whole machine (system folders are skipped). This can take a minute."
+                .dimmed()
+        );
+    }
     if !args.paths.is_empty() {
         add_roots(ctx, &args.paths)?;
     }
-    if ctx.config.roots.is_empty() {
+    // Nothing named and nothing remembered: start with the home folder.
+    if ctx.config.roots.is_empty() && !ctx.bootstrap_roots()? {
         anstream::eprintln!("{FIRST_RUN_HINT}");
         return Ok(ExitCode::from(1));
     }
@@ -77,7 +86,7 @@ pub fn roots(ctx: &mut Ctx, command: RootsCommand) -> Result<ExitCode> {
         RootsCommand::Rm { paths } => {
             let mut removed = 0;
             for p in &paths {
-                let canonical = fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+                let canonical = crate::fsutil::canonical(p).unwrap_or_else(|_| p.clone());
                 let before = ctx.config.roots.len();
                 ctx.config.roots.retain(|r| *r != canonical && r != p);
                 if ctx.config.roots.len() == before {
@@ -93,7 +102,9 @@ pub fn roots(ctx: &mut Ctx, command: RootsCommand) -> Result<ExitCode> {
         }
         RootsCommand::Ls => {
             if ctx.config.roots.is_empty() {
-                anstream::eprintln!("{FIRST_RUN_HINT}");
+                anstream::eprintln!(
+                    "No folders set up yet. The first command that needs them uses your home folder, or add one with `dotvault scan <dir>`."
+                );
                 return Ok(ExitCode::SUCCESS);
             }
             let mut out = stdout().lock();
@@ -113,8 +124,8 @@ pub fn roots(ctx: &mut Ctx, command: RootsCommand) -> Result<ExitCode> {
 fn add_roots(ctx: &mut Ctx, paths: &[PathBuf]) -> Result<usize> {
     let mut added = 0;
     for p in paths {
-        let canonical =
-            fs::canonicalize(p).with_context(|| format!("cannot access {}", p.display()))?;
+        let canonical = crate::fsutil::canonical(p)
+            .with_context(|| format!("cannot access {}", p.display()))?;
         if !canonical.is_dir() {
             bail!("{} is not a folder", p.display());
         }
@@ -141,9 +152,10 @@ pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {
 
     let records = ctx.records(args.refresh)?;
     let under = match &args.folder {
-        Some(p) => {
-            Some(fs::canonicalize(p).with_context(|| format!("cannot access {}", p.display()))?)
-        }
+        Some(p) => Some(
+            crate::fsutil::canonical(p)
+                .with_context(|| format!("cannot access {}", p.display()))?,
+        ),
         None => None,
     };
     let build = |filter_args: &FilterArgs| -> Result<Filter> {

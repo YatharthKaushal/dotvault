@@ -66,9 +66,11 @@ impl World {
             config: root.join("config"),
             data: root.join("data"),
             work: root.join("work"),
+            home: root.join("home"),
             url: self.url(),
         };
         fs::create_dir_all(&user.work).unwrap();
+        fs::create_dir_all(&user.home).unwrap();
         user
     }
 
@@ -98,6 +100,8 @@ struct User {
     config: PathBuf,
     data: PathBuf,
     work: PathBuf,
+    /// An empty stand-in for the home folder, so no test ever scans a real one.
+    home: PathBuf,
     url: String,
 }
 
@@ -106,6 +110,7 @@ impl User {
         let mut cmd = cargo_bin_cmd!("dotvault");
         cmd.env("DOTVAULT_CONFIG_DIR", &self.config)
             .env("DOTVAULT_DATA_DIR", &self.data)
+            .env("DOTVAULT_HOME", &self.home)
             .env("DOTVAULT_SERVER", &self.url)
             .env("DOTVAULT_USERNAME", &self.name)
             .env("DOTVAULT_PASSWORD", &self.password)

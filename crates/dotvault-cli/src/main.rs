@@ -2,6 +2,7 @@ mod cli;
 mod client;
 mod commands;
 mod config;
+mod discover;
 mod filter;
 mod fsutil;
 mod index;

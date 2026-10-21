@@ -85,12 +85,23 @@ impl Index {
         Ok(self.meta("last_scan")?.and_then(|v| v.parse().ok()))
     }
 
+    /// How long the last scan took, so a slow one is not repeated too often.
+    pub fn last_scan_millis(&self) -> Result<Option<u64>> {
+        Ok(self.meta("last_scan_ms")?.and_then(|v| v.parse().ok()))
+    }
+
     pub fn signature(&self) -> Result<Option<String>> {
         self.meta("signature")
     }
 
-    /// Swaps the whole index for the result of a fresh scan.
-    pub fn replace_all(&mut self, records: &[FileRecord], signature: &str, now: i64) -> Result<()> {
+    /// Swaps the whole index for the result of a fresh scan that took `scan_millis`.
+    pub fn replace_all(
+        &mut self,
+        records: &[FileRecord],
+        signature: &str,
+        now: i64,
+        scan_millis: u64,
+    ) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM files", [])?;
         {
@@ -101,6 +112,7 @@ impl Index {
         }
         for (k, v) in [
             ("last_scan", now.to_string()),
+            ("last_scan_ms", scan_millis.to_string()),
             ("signature", signature.to_string()),
         ] {
             tx.execute(
@@ -171,7 +183,7 @@ impl Index {
 
     /// Re-reads one file if it is already indexed (after `set`, `edit`, ...).
     pub fn touch(&self, path: &Path) -> Result<()> {
-        let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let canonical = crate::fsutil::canonical(path).unwrap_or_else(|_| path.to_path_buf());
         let existing = self
             .all()?
             .into_iter()
@@ -230,7 +242,8 @@ mod tests {
             rec("/p/b/.env", "b", "default", &["X", "Y"]),
             rec("/p/a/.env.example", "A", "example", &[]),
         ];
-        idx.replace_all(&recs, "sig", 123).unwrap();
+        idx.replace_all(&recs, "sig", 123, 45).unwrap();
+        assert_eq!(idx.last_scan_millis().unwrap(), Some(45));
         assert_eq!(idx.last_scan().unwrap(), Some(123));
         assert_eq!(idx.signature().unwrap().as_deref(), Some("sig"));
         let back = idx.all().unwrap();
@@ -244,9 +257,9 @@ mod tests {
     fn replace_all_discards_old_rows() {
         let dir = tempfile::tempdir().unwrap();
         let mut idx = Index::open(&dir.path().join("i.db")).unwrap();
-        idx.replace_all(&[rec("/p/a/.env", "a", "default", &[])], "s", 1)
+        idx.replace_all(&[rec("/p/a/.env", "a", "default", &[])], "s", 1, 0)
             .unwrap();
-        idx.replace_all(&[rec("/p/b/.env", "b", "default", &[])], "s", 2)
+        idx.replace_all(&[rec("/p/b/.env", "b", "default", &[])], "s", 2, 0)
             .unwrap();
         let all = idx.all().unwrap();
         assert_eq!(all.len(), 1);

@@ -29,7 +29,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Find env files under folders and remember those folders
+    /// Find env files under folders and remember those folders (default: your home folder)
     Scan(ScanArgs),
     /// Manage the folders that are searched
     Roots {
@@ -99,6 +99,9 @@ pub struct ScanArgs {
     /// How many directory levels to descend
     #[arg(long, value_name = "N")]
     pub depth: Option<usize>,
+    /// Also search the whole machine (system folders are skipped; this can take a minute)
+    #[arg(long)]
+    pub system: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -481,6 +484,26 @@ mod tests {
                 "{id}"
             );
         }
+    }
+
+    #[test]
+    fn scan_accepts_the_system_flag_with_or_without_folders() {
+        use super::{Command, ScanArgs};
+        use clap::Parser;
+        let scan = |args: &[&str]| match super::Cli::try_parse_from(args).unwrap().command {
+            Command::Scan(ScanArgs { paths, system, .. }) => (paths.len(), system),
+            _ => panic!("not a scan"),
+        };
+        assert_eq!(scan(&["dotvault", "scan"]), (0, false));
+        assert_eq!(scan(&["dotvault", "scan", "--system"]), (0, true));
+        assert_eq!(
+            scan(&["dotvault", "scan", "--system", "/srv/app"]),
+            (1, true)
+        );
+        assert_eq!(
+            scan(&["dotvault", "scan", "~/code", "--depth", "3"]),
+            (1, false)
+        );
     }
 
     /// `-v`, `-V` and `--version` print the version on the root command and on every

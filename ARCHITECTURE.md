@@ -27,8 +27,8 @@ flowchart LR
 crates/
   dotvault-core/src/    dotenv.rs  classify.rs  crypto.rs  share_code.rs  payload.rs  api.rs
   dotvault-cli/
-    src/                cli.rs  scan.rs  index.rs  filter.rs  resolve.rs  client.rs
-                        session.rs  prompt.rs  output.rs  fsutil.rs  config.rs
+    src/                cli.rs  scan.rs  discover.rs  index.rs  filter.rs  resolve.rs
+                        client.rs  session.rs  prompt.rs  output.rs  fsutil.rs  config.rs
     src/commands/       ls.rs  view.rs  edit.rs  account.rs  vault.rs  share.rs  cloud.rs
     tests/              local.rs (fixture trees)  cloud.rs (real binary, real server)
   dotvault-server/
@@ -46,8 +46,16 @@ deploy/                 dotvault.service  Caddyfile  Dockerfile  fly.toml  lites
 
 ## Finding files
 
-`scan` walks the remembered folders in parallel, skipping `node_modules`, `.git`,
-`target` and similar. It keeps `.env` and `.env.*` files, marks examples, assigns
+`scan` walks the remembered folders (roots) in parallel, skipping `node_modules`,
+`.git`, `target` and similar. When no roots exist yet, the first command that
+needs the index (`ls`, `find`, or a project name as a target) saves the home
+folder as the root; `scan --system` adds `/` or the system drive. `discover.rs`
+holds the skip rules that keep broad roots fast and safe: hidden and media
+folders directly inside a home folder, each platform's system folders (exact
+paths, so `/srv/usr` is kept), and on Linux the network and FUSE mounts from
+`/proc/mounts`, which can block. A home folder or filesystem root is never a
+project. A root named explicitly is never skipped, even inside a hidden folder.
+The time a scan took is stored, and slow scans are repeated less often. It keeps `.env` and `.env.*` files, marks examples, assigns
 each file to the nearest project folder (never above the scanned folder), and
 stores locations and variable **names** in `index.db`. Values are never cached.
 Every read stats the indexed files: deleted files drop out and changed files are

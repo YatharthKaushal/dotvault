@@ -35,7 +35,7 @@ pub(super) fn default_item_name(ctx: &Ctx, path: &Path) -> String {
     let opts: ClassifyOptions = classify_options(&ctx.config);
     let label = classify(&file_name, &opts).map_or(file_name.clone(), |i| i.label);
 
-    let home = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf());
+    let home = crate::discover::home_dir();
     let parent = abs.parent().unwrap_or(&abs);
     let root = find_project_root(parent, |dir| {
         if home.as_deref().is_some_and(|h| h.starts_with(dir)) {

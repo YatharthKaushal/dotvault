@@ -14,6 +14,8 @@ struct Sandbox {
     code: PathBuf,
     config: PathBuf,
     data: PathBuf,
+    /// An empty stand-in for the home folder, so no test ever scans a real one.
+    home: PathBuf,
 }
 
 fn write(root: &Path, rel: &str, contents: &str) {
@@ -55,9 +57,12 @@ impl Sandbox {
             "NEXT_PUBLIC_URL=http://dev.example\n",
         );
         write(&code, "loose/.env", "SOLO=1\n");
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
         Sandbox {
             config: tmp.path().join("config"),
             data: tmp.path().join("data"),
+            home,
             code,
             _tmp: tmp,
         }
@@ -73,6 +78,7 @@ impl Sandbox {
         let mut cmd = cargo_bin_cmd!("dotvault");
         cmd.env("DOTVAULT_CONFIG_DIR", &self.config)
             .env("DOTVAULT_DATA_DIR", &self.data)
+            .env("DOTVAULT_HOME", &self.home)
             .env("NO_COLOR", "1")
             .env_remove("VISUAL")
             .env_remove("EDITOR")
@@ -90,17 +96,6 @@ fn stdout_of(cmd: &mut Command) -> String {
 }
 
 // --- scan / ls ------------------------------------------------------------------
-
-#[test]
-fn ls_before_any_scan_explains_what_to_do() {
-    let s = Sandbox::new();
-    s.dv()
-        .arg("ls")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("dotvault scan"));
-}
 
 #[test]
 fn scan_reports_and_remembers_folders() {

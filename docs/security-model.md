@@ -120,10 +120,14 @@ data is unrecoverable by design. Your local files are never affected.
 
 | File | Contents | Protection |
 |---|---|---|
-| `config.toml` | server URL, scanned folders, settings | none needed, no secrets |
+| `config.toml` | server URL, scanned folders (your home folder by default), settings | none needed, no secrets |
 | `index.db` | paths and **variable names** of env files, never values | disposable cache |
 | `session.json` | server, username, session token, wrapped vault key, and (by default) the vault key | mode `0600` on Unix, written atomically; a warning is printed if it is loosened |
 
+* Finding files reads env files on your machine to list their variable names. It
+  makes no network request, and values are never written to `index.db`. A scan of
+  the home folder or the whole machine reads more files than a scan of one project
+  folder, but stores the same thing.
 * The session token can be revoked: `dotvault logout` revokes it on the server.
 * Caching the vault key is a convenience. `dotvault login --no-cache-key` keeps
   it off disk; vault commands then ask for your password and unwrap it locally.

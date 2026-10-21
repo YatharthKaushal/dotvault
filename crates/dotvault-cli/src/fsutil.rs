@@ -3,6 +3,12 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Like `fs::canonicalize`, but on Windows without the `\\?\` prefix, which
+/// would show up in every path dotvault prints and defeat the `~` shortening.
+pub fn canonical(path: &Path) -> io::Result<PathBuf> {
+    dunce::canonicalize(path)
+}
+
 /// Replaces `path` with `contents` without ever leaving a half-written file:
 /// the data goes to a temp file in the same directory which is then renamed
 /// over the target. Permissions of an existing file are kept; new files are

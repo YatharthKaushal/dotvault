@@ -119,7 +119,9 @@ fn variant_label(index: usize) -> String {
 
 pub fn find(ctx: &Ctx, args: FindArgs) -> Result<ExitCode> {
     if ctx.config.roots.is_empty() {
-        anstream::eprintln!("No folders are being scanned yet; run `dotvault scan <dir>` first.");
+        anstream::eprintln!(
+            "No folders are being scanned and your home folder could not be found; run `dotvault scan <dir>` first."
+        );
         return Ok(ExitCode::from(1));
     }
     // A plain name has no wildcards, so as a glob it is an exact (case-insensitive) match.

@@ -227,8 +227,7 @@ pub fn tilde(path: &Path) -> String {
 
 fn tilde_raw(path: &Path) -> String {
     static HOME: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
-    let home =
-        HOME.get_or_init(|| directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()));
+    let home = HOME.get_or_init(crate::discover::home_dir);
     if let Some(home) = home {
         if let Ok(rest) = path.strip_prefix(home) {
             return if rest.as_os_str().is_empty() {
