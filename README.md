@@ -43,9 +43,9 @@ features.
 ## Install
 
 > [!IMPORTANT]
-> There is no published release yet, and the repository is private for now. The
-> install scripts work for everyone once the repository is public and a release
-> exists. Until then, [build from source](#from-source).
+> There is no published release yet, so the install scripts report that they
+> cannot download anything until the first release exists. Until then,
+> [build from source](#from-source).
 
 **Linux and macOS** (x86_64 and aarch64; Linux needs glibc):
 
@@ -64,9 +64,9 @@ its SHA-256 checksum and copy the binary into place. They need no `sudo` or
 administrator rights. Read them first: [install.sh](install.sh),
 [install.ps1](install.ps1). You can also pick an archive yourself from the
 [releases page](https://github.com/YatharthKaushal/dotvault/releases), extract it
-and put `dotvault` on your `PATH`. The [site/](site/index.html) folder holds a
-download page with the same commands and direct links; it is published with
-GitHub Pages (`https://yatharthkaushal.github.io/dotvault/`) once the repository is public.
+and put `dotvault` on your `PATH`. The same commands and direct download links are
+on the [download page](https://yatharthkaushal.github.io/dotvault/) (source in
+[site/](site/index.html)).
 
 | | Linux and macOS | Windows |
 | :--- | :--- | :--- |
