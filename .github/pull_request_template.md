@@ -4,7 +4,7 @@
 
 ## Related issue
 
-<!-- Closes #123 — or "none" for small, self-evident changes. -->
+<!-- Closes #123, or "none" for small, self-evident changes. -->
 
 ## How it was tested
 

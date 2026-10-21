@@ -11,7 +11,7 @@ body:
         section before filing.
 
         **Do not paste real secrets, share links, share codes, session tokens or
-        recovery keys** — anyone who sees them can use them. Use throwaway values.
+        recovery keys.** Anyone who sees them can use them. Use throwaway values.
         For a security problem, use the
         [private security advisory form](https://github.com/YatharthKaushal/dotvault/security/advisories/new) instead.
 
@@ -40,10 +40,10 @@ body:
     attributes:
       label: Component
       options:
-        - CLI — local commands (scan, ls, show, find, set, ...)
-        - CLI — vault (push, pull, vault)
-        - CLI — sharing (share, open, shares)
-        - CLI — account (register, login, recover, ...)
+        - CLI - local commands (scan, ls, show, find, set, ...)
+        - CLI - vault (push, pull, vault)
+        - CLI - sharing (share, open, shares)
+        - CLI - account (register, login, recover, ...)
         - Server
         - Install / packaging
         - Documentation
@@ -73,7 +73,7 @@ body:
     id: version
     attributes:
       label: dotvault version
-      description: Output of `dotvault --version` (or the commit, for a source build — `git rev-parse --short HEAD`).
+      description: Output of `dotvault --version` (or, for a source build, the commit from `git rev-parse --short HEAD`).
     validations:
       required: true
 

@@ -23,8 +23,8 @@ will not be tolerated. This includes:
 
 ## Scope
 
-This applies to all project spaces — issues, pull requests, discussions, commit
-messages, and code review — and to public spaces when an individual is
+This applies to all project spaces (issues, pull requests, discussions, commit
+messages, and code review) and to public spaces when an individual is
 representing the project.
 
 ## Enforcement

@@ -1,9 +1,8 @@
 # Security model
 
-dotvault manages secrets, so this page says plainly what it protects, what it
-does not, and where the sharp edges are.
+What dotvault protects, what it does not, and the known limits.
 
-## In one paragraph
+## Summary
 
 Cloud data (your vault and shares) is encrypted **on your machine** before it
 is uploaded. The server stores ciphertext and hashes of derived secrets. It
@@ -131,17 +130,15 @@ data is unrecoverable by design. Your local files are never affected.
   Sharing and opening never need the vault key.
 * **No OS keychain yet.** Storing the session in macOS Keychain / Windows
   Credential Manager / Secret Service is planned. The current design is the same
-  one `gh`, `npm` and `aws` use for their tokens. Weigh it against this fact: the
-  point of the tool is to manage plaintext `.env` files on this same disk, so
-  someone who can read your home directory already has those.
+  one `gh`, `npm` and `aws` use for their tokens. The tool manages plaintext
+  `.env` files on the same disk, so someone who can read your home directory
+  already has those.
 * `DOTVAULT_TOKEN` + `DOTVAULT_SERVER` give scripts a session that can share and
   open but has no vault key. `DOTVAULT_PASSWORD` and friends exist for
   automation; environment variables are visible to other processes of the same
   user, so prefer the interactive prompt for everyday use.
 
-Local editing is careful by default: values are masked unless `--reveal` is
-given (including in `--format shell|json|dotenv`), `set`/`unset` rewrite only the
-lines they change and keep comments and layout, writes are atomic (temp file +
+Local edits rewrite only the lines they change, writes are atomic (temp file +
 rename), new files are created `0600`, symlinked env files stay symlinks, and
 non-UTF-8 files are refused rather than corrupted.
 

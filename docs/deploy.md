@@ -3,11 +3,9 @@
 The server is one binary (`dotvault-server`) with SQLite embedded. It needs a
 data directory and a TLS-terminating proxy in front of it. Nothing else.
 
-> **Status of this page.** The server itself is covered by an automated test
-> suite. The container image, `fly.toml`, the Litestream config and the Caddy
-> snippet below were written carefully but **have not been built or run in this
-> repository's CI yet** (no container runtime was available while writing them).
-> Try them on a throwaway instance first.
+> The server is covered by automated tests. The container image, `fly.toml`, the
+> Litestream config and the Caddy snippet have not been built or run yet, so try
+> them on a throwaway instance first.
 
 ## Configuration
 

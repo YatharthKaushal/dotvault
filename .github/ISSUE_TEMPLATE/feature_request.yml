@@ -29,11 +29,11 @@ body:
     attributes:
       label: Area
       options:
-        - Local commands — finding, reading, editing env files
-        - Vault — push, pull, versions
-        - Sharing — links, codes, expiry, audit
-        - Accounts — login, recovery, sessions
-        - Server — API, hosting, storage
+        - Local commands - finding, reading, editing env files
+        - Vault - push, pull, versions
+        - Sharing - links, codes, expiry, audit
+        - Accounts - login, recovery, sessions
+        - Server - API, hosting, storage
         - Security
         - Install / packaging / platforms
         - Documentation
