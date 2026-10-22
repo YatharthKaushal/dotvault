@@ -671,7 +671,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dotvault"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anstream",
  "anyhow",
@@ -702,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "dotvault-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "base64 0.23.1",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "dotvault-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
