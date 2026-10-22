@@ -67,8 +67,9 @@ disposable and is rebuilt if it is unreadable.
 
 `get` and `show --keys` choose variables with `keys.rs`: a plain name matches
 exactly and a glob matches case-sensitively, because variable names are
-case-sensitive. One plain name prints the bare value; anything else prints
-dotenv lines.
+case-sensitive. One plain name prints the bare value; several names, a glob or
+`--kv` print dotenv lines. `-ckv` is expanded to `-c --kv` before parsing, because
+clap reads a short cluster as separate letters and `-v` is the version flag.
 
 `get --copy` hands the text to `clipboard.rs`, which starts this same binary as
 the hidden command `_clip-hold` in its own process group (detached from the

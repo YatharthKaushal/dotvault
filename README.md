@@ -176,6 +176,7 @@ dotvault show acme-api:production --reveal --keys DATABASE_URL,'STRIPE_*'
 dotvault get DATABASE_URL -p acme-api -e production        # prints just the value
 dotvault get DATABASE_URL STRIPE_KEY -f ./.env             # several: KEY=value lines
 dotvault get DATABASE_URL -p acme-api -e production -c     # copies it, clears in 30 s
+dotvault get DATABASE_URL -p acme-api -e production -ckv   # copies DATABASE_URL=value
 dotvault find STRIPE_KEY                  # where is it defined, and do the copies agree?
 dotvault diff acme-api:staging acme-api:production
 dotvault set API_KEY=new -p acme-api -e production
@@ -187,8 +188,10 @@ dotvault edit acme-api:local              # opens $VISUAL / $EDITOR
 ### Copying to the clipboard
 
 `dotvault get KEY -c` puts the value on the clipboard and prints nothing, so it
-stays out of your terminal and scrollback. With several names or a glob it copies
-`KEY=value` lines. The clipboard is cleared after 30 seconds, but only if it
+stays out of your terminal and scrollback. `-ckv` (or `-ck`) copies `KEY=value`
+instead of just the value, and with several names or a glob it always copies
+`KEY=value` lines. What is copied is exact, even if it holds control characters
+that printing would make visible. The clipboard is cleared after 30 seconds, but only if it
 still holds that value, so anything you copied in the meantime is left alone. The
 value goes to a short-lived helper process through a pipe, never on a command
 line. Where the platform has a way to ask, clipboard history is told to skip it
@@ -275,7 +278,7 @@ dotvault shares revoke <id>
 | `ls [FOLDER]` | List env files. Filters: `-p/--project`, `-e/--env`, `--path`, `-k/--has-key`, `--examples`, `--only-examples`. Output: `--paths`, `--json`. `--refresh` rescans first. |
 | `show [TARGET]` | Show a file's variables. `--reveal`, `--keys A,B`, `--format table\|dotenv\|json\|shell\|powershell`. |
 | `find PATTERN` | Find a variable (name or glob) across all files. Same filters as `ls`, plus `--reveal`, `--json`. Rows with the same variant letter hold the same value. |
-| `get KEY...` | Print raw values: one name prints the bare value, several names or a glob like `'STRIPE_*'` print `KEY=value` lines. Pick the file with `-f FILE` or `-p PROJECT [-e ENV]`. `-c` copies to the clipboard instead. |
+| `get KEY...` | Print raw values: one name prints the bare value, several names or a glob like `'STRIPE_*'` print `KEY=value` lines. Pick the file with `-f FILE` or `-p PROJECT [-e ENV]`. `-k`/`--kv` gives `KEY=value` even for one name. `-c` copies to the clipboard instead, and `-ckv` copies the whole pair. |
 | `set KEY=VALUE...` | Set variables, keeping comments and layout. A bare `KEY` prompts for the value. Creates the file if needed. |
 | `unset KEY...` | Remove variables. |
 | `edit [TARGET]` | Open the file in `$VISUAL` / `$EDITOR`. |

@@ -95,6 +95,30 @@ pub enum Command {
     ClipHold,
 }
 
+/// Spells out `-ckv` (copy KEY=value) before clap sees it. Short flags are one
+/// letter, so clap would read `-ckv` as `-c -k -v`, and `-v` prints the version.
+pub fn expand_shorthands<I>(args: I) -> Vec<std::ffi::OsString>
+where
+    I: IntoIterator<Item = std::ffi::OsString>,
+{
+    let mut after_dashes = false;
+    let mut out = Vec::new();
+    for arg in args {
+        if after_dashes {
+            out.push(arg);
+        } else if arg == "--" {
+            after_dashes = true;
+            out.push(arg);
+        } else if arg == "-ckv" {
+            out.push("-c".into());
+            out.push("--kv".into());
+        } else {
+            out.push(arg);
+        }
+    }
+    out
+}
+
 #[derive(Args, Debug)]
 pub struct ScanArgs {
     /// Folders to search and remember (default: the folders already remembered)
@@ -211,6 +235,10 @@ pub struct GetArgs {
     /// Copy to the clipboard instead of printing, and clear it again after 30 seconds
     #[arg(short = 'c', long)]
     pub copy: bool,
+
+    /// Print or copy KEY=value instead of just the value (`-ckv` is short for `-c --kv`)
+    #[arg(short = 'k', long)]
+    pub kv: bool,
 }
 
 #[derive(Args, Debug)]
@@ -514,6 +542,60 @@ mod tests {
             scan(&["dotvault", "scan", "~/code", "--depth", "3"]),
             (1, false)
         );
+    }
+
+    fn expanded(args: &[&str]) -> Vec<String> {
+        super::expand_shorthands(args.iter().map(std::ffi::OsString::from))
+            .into_iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn ckv_is_shorthand_for_copy_and_kv_and_other_flags_are_left_alone() {
+        assert_eq!(
+            expanded(&["dotvault", "get", "K", "-ckv"]),
+            ["dotvault", "get", "K", "-c", "--kv"]
+        );
+        for untouched in ["-c", "-ck", "-kc", "--kv", "--copy", "-v", "-cv", "-ckvx"] {
+            assert_eq!(
+                expanded(&["dotvault", "get", "K", untouched]),
+                ["dotvault", "get", "K", untouched]
+            );
+        }
+        // after `--` everything is a plain argument
+        assert_eq!(
+            expanded(&["dotvault", "get", "--", "-ckv"]),
+            ["dotvault", "get", "--", "-ckv"]
+        );
+    }
+
+    #[test]
+    fn get_parses_copy_and_kv_in_every_spelling() {
+        use super::{Command, GetArgs};
+        use clap::Parser;
+        let get = |args: &[&str]| match super::Cli::try_parse_from(expanded(args)).unwrap().command
+        {
+            Command::Get(GetArgs { copy, kv, keys, .. }) => (keys.len(), copy, kv),
+            _ => panic!("not a get"),
+        };
+        assert_eq!(get(&["dotvault", "get", "K"]), (1, false, false));
+        assert_eq!(get(&["dotvault", "get", "K", "-c"]), (1, true, false));
+        assert_eq!(get(&["dotvault", "get", "K", "-k"]), (1, false, true));
+        assert_eq!(get(&["dotvault", "get", "K", "-ckv"]), (1, true, true));
+        assert_eq!(get(&["dotvault", "get", "K", "-ck"]), (1, true, true));
+        assert_eq!(
+            get(&["dotvault", "get", "K", "--copy", "--kv"]),
+            (1, true, true)
+        );
+        assert_eq!(
+            get(&["dotvault", "get", "A", "B", "-ckv", "-f", "x"]),
+            (2, true, true)
+        );
+        // `-v` on its own is still the version flag
+        let err = super::Cli::try_parse_from(expanded(&["dotvault", "get", "K", "-v"]))
+            .expect_err("-v prints the version");
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
     }
 
     /// `-v`, `-V` and `--version` print the version on the root command and on every

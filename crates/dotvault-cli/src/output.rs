@@ -117,7 +117,18 @@ pub fn skipped_names(format: Format, pairs: &[(String, String)]) -> usize {
 /// drive the terminal.
 pub fn render_pairs_warn(format: Format, pairs: &[(String, String)], reveal: bool) -> String {
     use std::io::IsTerminal;
-    if io::stdout().is_terminal() {
+    render_pairs_for(io::stdout().is_terminal(), format, pairs, reveal)
+}
+
+/// [`render_pairs_warn`] with the terminal check made by the caller, so that
+/// something that is not going to the screen (a copy) can ask for exact data.
+pub fn render_pairs_for(
+    terminal: bool,
+    format: Format,
+    pairs: &[(String, String)],
+    reveal: bool,
+) -> String {
+    if terminal {
         let safe: Vec<(String, String)> = pairs
             .iter()
             .map(|(k, v)| {

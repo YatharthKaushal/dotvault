@@ -313,3 +313,93 @@ fn the_value_never_appears_on_the_helpers_command_line() {
     }
     assert!(helpers >= 1, "the helper should still be holding the value");
 }
+
+#[test]
+fn kv_prints_the_whole_pair_for_one_name_and_quotes_what_needs_it() {
+    let b = Fixture::new();
+    let out = stdout_of(
+        b.dv(1)
+            .args(["get", "DATABASE_URL", "--kv", "-f"])
+            .arg(&b.file),
+    );
+    assert_eq!(out, "DATABASE_URL=postgres://user:pw-1f3a@host/db\n");
+    let out = stdout_of(
+        b.dv(1)
+            .args(["get", "RAZORPAY_KEY_SECRET", "-k", "-f"])
+            .arg(&b.file),
+    );
+    assert_eq!(out, "RAZORPAY_KEY_SECRET=\"has space & 'quote'\"\n");
+}
+
+#[test]
+fn ckv_copies_the_whole_key_value_pair_and_prints_nothing_else() {
+    let b = Fixture::new();
+    b.dv(30)
+        .args(["get", "DATABASE_URL", "-ckv", "-f"])
+        .arg(&b.file)
+        .assert()
+        .success()
+        .stdout("")
+        .stderr(predicate::str::contains("Copied DATABASE_URL as KEY=value"))
+        .stderr(predicate::str::contains("pw-1f3a").not());
+    assert_eq!(
+        b.clipboard().as_deref(),
+        Some("DATABASE_URL=postgres://user:pw-1f3a@host/db")
+    );
+}
+
+#[test]
+fn ck_and_the_long_flags_do_the_same_as_ckv() {
+    for flags in [&["-ck"][..], &["-kc"], &["--copy", "--kv"], &["-c", "-k"]] {
+        let b = Fixture::new();
+        b.dv(30)
+            .args(["get", "LIVEKIT_URL"])
+            .args(flags)
+            .arg("-f")
+            .arg(&b.file)
+            .assert()
+            .success()
+            .stdout("");
+        assert_eq!(
+            b.clipboard().as_deref(),
+            Some("LIVEKIT_URL=wss://livekit.example"),
+            "{flags:?}"
+        );
+    }
+}
+
+#[test]
+fn plain_c_still_copies_just_the_value() {
+    let b = Fixture::new();
+    b.dv(30)
+        .args(["get", "LIVEKIT_URL", "-c", "-f"])
+        .arg(&b.file)
+        .assert()
+        .success();
+    assert_eq!(b.clipboard().as_deref(), Some("wss://livekit.example"));
+}
+
+#[test]
+fn ckv_with_a_glob_or_several_names_changes_nothing_because_they_are_pairs_already() {
+    let b = Fixture::new();
+    b.dv(30)
+        .args(["get", "DATABASE_URL", "LIVEKIT_URL", "-ckv", "-f"])
+        .arg(&b.file)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Copied 2 variables"));
+    assert_eq!(
+        b.clipboard().as_deref(),
+        Some("DATABASE_URL=postgres://user:pw-1f3a@host/db\nLIVEKIT_URL=wss://livekit.example")
+    );
+}
+
+#[test]
+fn v_is_still_the_version_flag_on_get() {
+    let b = Fixture::new();
+    b.dv(1)
+        .args(["get", "-v"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("dotvault-get "));
+}

@@ -21,7 +21,7 @@ use clap::Parser;
 use owo_colors::OwoColorize;
 
 fn main() -> ExitCode {
-    let cli = cli::Cli::parse();
+    let cli = cli::Cli::parse_from(cli::expand_shorthands(std::env::args_os()));
     match commands::run(cli) {
         Ok(code) => code,
         Err(err) => {
