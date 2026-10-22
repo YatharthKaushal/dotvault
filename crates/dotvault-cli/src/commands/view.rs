@@ -11,12 +11,13 @@ use serde::Serialize;
 use super::{read_text, resolve_target, Ctx, ResolveOpts};
 use crate::cli::{DiffArgs, FindArgs, ShowArgs, TargetFlags};
 use crate::filter::Filter;
+use crate::keys;
 use crate::output::{
     masked, print_json, render_pairs_warn, sanitize, shown, stdout, tilde, Cell, Format, Style,
     Table,
 };
 
-fn pairs_of(env: &DotEnv) -> Vec<(String, String)> {
+pub(super) fn pairs_of(env: &DotEnv) -> Vec<(String, String)> {
     env.pairs()
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -38,24 +39,22 @@ pub fn show(ctx: &Ctx, args: ShowArgs) -> Result<ExitCode> {
     let mut exit = ExitCode::SUCCESS;
 
     if !args.keys.is_empty() {
-        let mut selected = Vec::new();
-        let mut missing = Vec::new();
-        for key in &args.keys {
-            match pairs.iter().find(|(k, _)| k == key) {
-                Some(pair) => selected.push(pair.clone()),
-                None => missing.push(key.as_str()),
-            }
-        }
-        if !missing.is_empty() {
+        let picked = keys::select(&pairs, &args.keys)?;
+        if !picked.missing.is_empty() {
+            let what: Vec<String> = picked
+                .missing
+                .iter()
+                .map(|m| keys::describe_missing(m))
+                .collect();
             anstream::eprintln!(
-                "{} not set in {}: {}",
+                "{} {} in {}",
                 "warning:".yellow().bold(),
-                tilde(&path),
-                missing.join(", ")
+                sanitize(&what.join("; ")),
+                tilde(&path)
             );
             exit = ExitCode::from(1);
         }
-        pairs = selected;
+        pairs = picked.chosen;
     }
 
     print_pairs(&tilde(&path), &pairs, args.format, args.reveal)?;

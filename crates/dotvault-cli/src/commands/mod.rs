@@ -14,6 +14,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use owo_colors::OwoColorize;
 
 use crate::cli::{Cli, Command, TargetFlags};
+use crate::clipboard;
 use crate::config::{Config, Dirs};
 use crate::discover;
 use crate::index::{FileRecord, Index};
@@ -22,6 +23,10 @@ use crate::resolve::{self, parse_target, Target};
 use crate::scan::{self, ScanOptions, ScanOutcome};
 
 pub fn run(cli: Cli) -> Result<ExitCode> {
+    // The clipboard helper needs nothing from the config, so it starts without it.
+    if matches!(cli.command, Command::ClipHold) {
+        return clipboard::hold();
+    }
     let mut ctx = Ctx::load()?;
     if cli.command.needs_index() {
         ctx.bootstrap_roots()?;
@@ -56,6 +61,7 @@ pub fn run(cli: Cli) -> Result<ExitCode> {
             clap_complete::generate(shell, &mut cmd, "dotvault", &mut std::io::stdout());
             Ok(ExitCode::SUCCESS)
         }
+        Command::ClipHold => clipboard::hold(),
     }
 }
 

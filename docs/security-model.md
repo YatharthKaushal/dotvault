@@ -128,6 +128,15 @@ data is unrecoverable by design. Your local files are never affected.
   makes no network request, and values are never written to `index.db`. A scan of
   the home folder or the whole machine reads more files than a scan of one project
   folder, but stores the same thing.
+* `dotvault get KEY -c` puts a value on the system clipboard. The clipboard is
+  shared with every program you run, so the value is there for up to 30 seconds
+  and is cleared only if it is still the same text. A helper process holds it
+  (Linux needs that), receives it on stdin and never on its command line, and
+  shares no output with the shell, so nothing is printed or left in scrollback.
+  Clipboard history is asked to skip the value (the `x-kde-passwordManagerHint`
+  convention on Linux, `nspasteboard.org` on macOS, history, cloud sync and
+  monitoring exclusions on Windows). Tools that ignore these hints may still keep
+  a copy, which dotvault cannot remove.
 * The session token can be revoked: `dotvault logout` revokes it on the server.
 * Caching the vault key is a convenience. `dotvault login --no-cache-key` keeps
   it off disk; vault commands then ask for your password and unwrap it locally.

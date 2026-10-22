@@ -30,6 +30,8 @@ features.
 - Searches a variable across all files and shows which environments disagree.
 - Masks values unless you pass `--reveal`. Prints as a table, dotenv, JSON, shell
   or PowerShell.
+- Copies a value, or several, to the clipboard with `get -c` and clears it again
+  after 30 seconds.
 - Edits in place with `set`, `unset` and `edit`. Comments and order are kept and
   writes are atomic.
 - Diffs two environments.
@@ -37,7 +39,7 @@ features.
   server stores only ciphertext.
 - Shares chosen variables through a link or short code, with an expiry, an open
   limit, revocation and a log of who opened it. The recipient needs an account.
-- One native binary of 4 to 5 MB depending on the platform. On Linux it starts in
+- One native binary of 4 to 5 MiB depending on the platform. On Linux it starts in
   under 2 ms and lists 600 env files across 300 projects in about 11 ms.
 
 ## Install
@@ -170,7 +172,10 @@ dotvault scan ~/code                      # look only in a folder you name
 dotvault scan --system                    # look on the whole machine (servers, /srv, /var/www)
 dotvault ls -p acme -e production         # filter
 dotvault show acme-api:production         # values are masked
-dotvault show acme-api:production --reveal --keys DATABASE_URL
+dotvault show acme-api:production --reveal --keys DATABASE_URL,'STRIPE_*'
+dotvault get DATABASE_URL -p acme-api -e production        # prints just the value
+dotvault get DATABASE_URL STRIPE_KEY -f ./.env             # several: KEY=value lines
+dotvault get DATABASE_URL -p acme-api -e production -c     # copies it, clears in 30 s
 dotvault find STRIPE_KEY                  # where is it defined, and do the copies agree?
 dotvault diff acme-api:staging acme-api:production
 dotvault set API_KEY=new -p acme-api -e production
@@ -178,6 +183,26 @@ dotvault set SECRET                       # prompts, so it stays out of shell hi
 dotvault unset OLD_KEY -f ./.env
 dotvault edit acme-api:local              # opens $VISUAL / $EDITOR
 ```
+
+### Copying to the clipboard
+
+`dotvault get KEY -c` puts the value on the clipboard and prints nothing, so it
+stays out of your terminal and scrollback. With several names or a glob it copies
+`KEY=value` lines. The clipboard is cleared after 30 seconds, but only if it
+still holds that value, so anything you copied in the meantime is left alone. The
+value goes to a short-lived helper process through a pipe, never on a command
+line. Where the platform has a way to ask, clipboard history is told to skip it
+(on Windows also cloud sync).
+
+| Where | Copying |
+| :--- | :--- |
+| Windows, macOS | Uses the system clipboard. So far only the Linux X11 path has been tried against a real clipboard, so please report problems. |
+| Linux with X11 | Works. The helper stays alive to answer paste requests, then clears the value. |
+| Linux with Wayland | Goes through XWayland. Not tested here; if it fails you get an error and `get` without `-c` still works. |
+| SSH, containers, servers | No clipboard exists. You get an error, and the value is never printed in its place. |
+
+Any program you run can read the clipboard while the value is on it, and a
+clipboard manager that ignores the history hint may keep a copy.
 
 ### Where dotvault looks
 
@@ -250,7 +275,7 @@ dotvault shares revoke <id>
 | `ls [FOLDER]` | List env files. Filters: `-p/--project`, `-e/--env`, `--path`, `-k/--has-key`, `--examples`, `--only-examples`. Output: `--paths`, `--json`. `--refresh` rescans first. |
 | `show [TARGET]` | Show a file's variables. `--reveal`, `--keys A,B`, `--format table\|dotenv\|json\|shell\|powershell`. |
 | `find PATTERN` | Find a variable (name or glob) across all files. Same filters as `ls`, plus `--reveal`, `--json`. Rows with the same variant letter hold the same value. |
-| `get KEY` | Print one raw value. Pick the file with `-f FILE` or `-p PROJECT [-e ENV]`. |
+| `get KEY...` | Print raw values: one name prints the bare value, several names or a glob like `'STRIPE_*'` print `KEY=value` lines. Pick the file with `-f FILE` or `-p PROJECT [-e ENV]`. `-c` copies to the clipboard instead. |
 | `set KEY=VALUE...` | Set variables, keeping comments and layout. A bare `KEY` prompts for the value. Creates the file if needed. |
 | `unset KEY...` | Remove variables. |
 | `edit [TARGET]` | Open the file in `$VISUAL` / `$EDITOR`. |

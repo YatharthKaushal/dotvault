@@ -1,11 +1,13 @@
 mod cli;
 mod client;
+mod clipboard;
 mod commands;
 mod config;
 mod discover;
 mod filter;
 mod fsutil;
 mod index;
+mod keys;
 mod output;
 mod prompt;
 mod resolve;

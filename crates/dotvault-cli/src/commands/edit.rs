@@ -8,8 +8,10 @@ use owo_colors::OwoColorize;
 
 use super::{read_text, resolve_target, Ctx, ResolveOpts};
 use crate::cli::{EditArgs, GetArgs, SetArgs, UnsetArgs};
+use crate::clipboard;
 use crate::fsutil;
-use crate::output::{stdout, tilde};
+use crate::keys;
+use crate::output::{render_pairs_warn, sanitize, stdout, tilde, Format};
 
 fn existing() -> ResolveOpts {
     ResolveOpts {
@@ -28,14 +30,40 @@ fn creatable() -> ResolveOpts {
 pub fn get(ctx: &Ctx, args: GetArgs) -> Result<ExitCode> {
     let path = resolve_target(ctx, None, &args.flags, existing())?;
     let env = DotEnv::parse(&read_text(&path, false)?);
-    match env.get(&args.key) {
-        Some(value) => {
-            let mut out = stdout().lock();
-            writeln!(out, "{value}")?;
-            Ok(ExitCode::SUCCESS)
-        }
-        None => bail!("{} is not set in {}", args.key, tilde(&path)),
+    let picked = keys::select(&super::view::pairs_of(&env), &args.keys)?;
+    if !picked.missing.is_empty() {
+        let what: Vec<String> = picked
+            .missing
+            .iter()
+            .map(|m| keys::describe_missing(m))
+            .collect();
+        bail!("{} in {}", what.join("; "), tilde(&path));
     }
+
+    // One plain name prints the bare value, so `$(dotvault get KEY)` keeps
+    // working. Several names, or a glob, print KEY=value lines.
+    let text = match (args.keys.as_slice(), picked.chosen.as_slice()) {
+        ([key], [(_, value)]) if !keys::is_glob(key) => value.clone(),
+        _ => render_pairs_warn(Format::Dotenv, &picked.chosen, true)
+            .trim_end_matches('\n')
+            .to_string(),
+    };
+
+    if args.copy {
+        clipboard::copy(&text)?;
+        let what = match picked.chosen.as_slice() {
+            [(key, _)] => sanitize(key).into_owned(),
+            many => format!("{} variables", many.len()),
+        };
+        anstream::eprintln!(
+            "Copied {what} to the clipboard. It clears in {}s.",
+            clipboard::CLEAR_AFTER.as_secs()
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    writeln!(stdout().lock(), "{text}")?;
+    Ok(ExitCode::SUCCESS)
 }
 
 pub fn set(ctx: &Ctx, args: SetArgs) -> Result<ExitCode> {

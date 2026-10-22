@@ -43,7 +43,7 @@ pub enum Command {
     Show(ShowArgs),
     /// Find a variable across every env file
     Find(FindArgs),
-    /// Print the value of one variable
+    /// Print the value of one or more variables, or copy it to the clipboard
     Get(GetArgs),
     /// Set variables, keeping the rest of the file untouched
     Set(SetArgs),
@@ -90,6 +90,9 @@ pub enum Command {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// Internal: holds a copied value on the clipboard, then clears it (started by `get --copy`)
+    #[command(name = "_clip-hold", hide = true)]
+    ClipHold,
 }
 
 #[derive(Args, Debug)]
@@ -163,7 +166,7 @@ pub struct ShowArgs {
     #[command(flatten)]
     pub flags: TargetFlags,
 
-    /// Only these variables (comma separated)
+    /// Only these variables (comma separated; names or globs like 'RAZORPAY_*')
     #[arg(short, long, value_delimiter = ',', value_name = "KEYS")]
     pub keys: Vec<String>,
 
@@ -197,10 +200,17 @@ pub struct FindArgs {
 
 #[derive(Args, Debug)]
 pub struct GetArgs {
-    pub key: String,
+    /// Variables to print: one name prints the bare value, several (or a glob like
+    /// 'RAZORPAY_*') print KEY=value lines
+    #[arg(required = true, value_name = "KEY")]
+    pub keys: Vec<String>,
 
     #[command(flatten)]
     pub flags: TargetFlags,
+
+    /// Copy to the clipboard instead of printing, and clear it again after 30 seconds
+    #[arg(short = 'c', long)]
+    pub copy: bool,
 }
 
 #[derive(Args, Debug)]

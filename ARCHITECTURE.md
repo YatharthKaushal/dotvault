@@ -28,7 +28,8 @@ crates/
   dotvault-core/src/    dotenv.rs  classify.rs  crypto.rs  share_code.rs  payload.rs  api.rs
   dotvault-cli/
     src/                cli.rs  scan.rs  discover.rs  index.rs  filter.rs  resolve.rs
-                        client.rs  session.rs  prompt.rs  output.rs  fsutil.rs  config.rs
+                        keys.rs  clipboard.rs  client.rs  session.rs  prompt.rs
+                        output.rs  fsutil.rs  config.rs
     src/commands/       ls.rs  view.rs  edit.rs  account.rs  vault.rs  share.rs  cloud.rs
     tests/              local.rs (fixture trees)  cloud.rs (real binary, real server)
   dotvault-server/
@@ -55,11 +56,31 @@ folders directly inside a home folder, each platform's system folders (exact
 paths, so `/srv/usr` is kept), and on Linux the network and FUSE mounts from
 `/proc/mounts`, which can block. A home folder or filesystem root is never a
 project. A root named explicitly is never skipped, even inside a hidden folder.
-The time a scan took is stored, and slow scans are repeated less often. It keeps `.env` and `.env.*` files, marks examples, assigns
-each file to the nearest project folder (never above the scanned folder), and
-stores locations and variable **names** in `index.db`. Values are never cached.
-Every read stats the indexed files: deleted files drop out and changed files are
-re-read. The index is disposable and is rebuilt if it is unreadable.
+The time a scan took is stored, and slow scans are repeated less often. It keeps
+`.env` and `.env.*` files, marks examples, assigns each file to the nearest
+project folder (never above the scanned folder), and stores locations and
+variable **names** in `index.db`. Values are never cached. Every read stats the
+indexed files: deleted files drop out and changed files are re-read. The index is
+disposable and is rebuilt if it is unreadable.
+
+## Reading and copying values
+
+`get` and `show --keys` choose variables with `keys.rs`: a plain name matches
+exactly and a glob matches case-sensitively, because variable names are
+case-sensitive. One plain name prints the bare value; anything else prints
+dotenv lines.
+
+`get --copy` hands the text to `clipboard.rs`, which starts this same binary as
+the hidden command `_clip-hold` in its own process group (detached from the
+console on Windows). The value goes in on stdin and the helper answers `ok` or
+`error: ...` on its own stdout pipe, so the caller learns whether it worked and
+the helper shares no output with the shell. On Linux the helper must stay alive
+because the copying process serves paste requests. On every platform it sleeps
+for 30 seconds and clears the clipboard only if it still holds the same text.
+`arboard` does the platform work, without its Wayland feature: Wayland sessions
+use XWayland. Debug builds read `DOTVAULT_CLIPBOARD_FILE` and
+`DOTVAULT_CLIPBOARD_SECS` so the tests never touch a real clipboard; release
+builds ignore both.
 
 ## Keys
 
