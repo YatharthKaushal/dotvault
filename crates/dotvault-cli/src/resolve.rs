@@ -265,7 +265,8 @@ mod tests {
             err.contains("2 projects") && err.contains("/r/a/api"),
             "{err}"
         );
-        assert!(err.contains("/r/b/api/.env"), "{err}");
+        // Windows joins with a backslash
+        assert!(err.replace('\\', "/").contains("/r/b/api/.env"), "{err}");
         assert!(!err.contains('\n'), "must stay on one line: {err:?}");
     }
 

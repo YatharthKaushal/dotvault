@@ -33,6 +33,11 @@ unicode-width = "0.2.2"
 ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
 zeroize = "1.9.1"
 
+# Already in the tree through arboard; used to keep the clipboard helper from
+# inheriting this program's output pipe.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console"] }
+
 [dev-dependencies]
 assert_cmd = "2.2.2"
 dotvault-server = { path = "../dotvault-server" }

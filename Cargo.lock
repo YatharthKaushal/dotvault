@@ -697,6 +697,7 @@ dependencies = [
  "toml",
  "unicode-width",
  "ureq",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

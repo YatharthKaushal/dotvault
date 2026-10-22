@@ -134,8 +134,30 @@ fn detach(command: &mut Command) {
 #[cfg(windows)]
 fn detach(command: &mut Command) {
     use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::Foundation::{
+        SetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+    // Rust starts every child with all the handles this program may pass on. The
+    // helper would then keep this program's own output pipe open, and whatever
+    // waits for that pipe to close (a script capturing the output) would wait for
+    // the helper too. The helper's own stdin, stdout and stderr are set
+    // explicitly, so they are not affected.
+    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: both calls only look at, and flag, a handle of this process, and
+        // a missing or invalid handle is skipped.
+        unsafe {
+            let handle = GetStdHandle(which);
+            if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
     command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 }
 
