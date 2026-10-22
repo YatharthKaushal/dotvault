@@ -39,7 +39,7 @@ features.
   server stores only ciphertext.
 - Shares chosen variables through a link or short code, with an expiry, an open
   limit, revocation and a log of who opened it. The recipient needs an account.
-- One native binary of 4 to 5 MiB depending on the platform. On Linux it starts in
+- One native binary of about 4 to 5 MiB depending on the platform. On Linux it starts in
   under 2 ms and lists 600 env files across 300 projects in about 11 ms.
 
 ## Install
