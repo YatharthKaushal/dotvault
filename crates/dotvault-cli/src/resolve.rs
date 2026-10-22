@@ -42,6 +42,12 @@ pub fn expand_tilde(text: &str) -> PathBuf {
     PathBuf::from(text)
 }
 
+/// Whether a project name was probably meant as a file path (`-p ./.env`), which
+/// belongs after `-f`.
+fn looks_like_path(name: &str) -> bool {
+    name.contains(['/', '\\']) || name.starts_with('~') || name.starts_with(".env")
+}
+
 /// Picks the single file a `project[:env]` selector refers to.
 ///
 /// Without an env, example files are not candidates and a bare `.env`
@@ -59,6 +65,9 @@ pub fn pick<'a>(
         .collect();
 
     if in_project.is_empty() {
+        if looks_like_path(name) {
+            bail!("no project named {name:?}; that looks like a file path, so pass it with -f instead: -f {name}");
+        }
         let near: Vec<&str> = {
             let needle = name.to_lowercase();
             let mut v: Vec<&str> = records
@@ -95,14 +104,15 @@ pub fn pick<'a>(
     roots.sort_unstable();
     roots.dedup();
     if roots.len() > 1 {
+        // One line: errors are sanitized as a whole, which would show a newline as `\n`.
         bail!(
-            "{} projects are named {name:?}; pass a path instead:\n{}",
+            "{} projects are named {name:?}; pass a path instead: {}",
             roots.len(),
             candidates
                 .iter()
-                .map(|r| format!("  {}", tilde(&r.path)))
+                .map(|r| tilde(&r.path))
                 .collect::<Vec<_>>()
-                .join("\n")
+                .join(", ")
         );
     }
 
@@ -255,6 +265,8 @@ mod tests {
             err.contains("2 projects") && err.contains("/r/a/api"),
             "{err}"
         );
+        assert!(err.contains("/r/b/api/.env"), "{err}");
+        assert!(!err.contains('\n'), "must stay on one line: {err:?}");
     }
 
     #[test]
@@ -273,5 +285,29 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("x:example"), "{err}");
+    }
+
+    #[test]
+    fn a_path_given_as_a_project_points_at_dash_f() {
+        let recs = vec![rec("acme-api", "/r/acme-api", "default")];
+        for given in [
+            "/home/me/code/acme-api/.env",
+            "./.env",
+            "../api/.env.local",
+            r"C:\code\api\.env",
+            "~/code/api/.env",
+            ".env.production",
+        ] {
+            let err = pick(&recs, given, None, false).unwrap_err().to_string();
+            assert!(
+                err.contains(&format!("pass it with -f instead: -f {given}")),
+                "{err}"
+            );
+        }
+        // plain names, even with dots, keep the usual messages
+        for given in ["my.app", "zzz", "acme"] {
+            let err = pick(&recs, given, None, false).unwrap_err().to_string();
+            assert!(!err.contains("-f"), "{err}");
+        }
     }
 }

@@ -298,3 +298,49 @@ fn roots_ls_shows_the_home_folder_after_discovery() {
         .success()
         .stdout(predicate::str::diff("~\n"));
 }
+
+#[test]
+fn an_ambiguous_project_name_lists_the_paths_on_one_readable_line() {
+    let m = Machine::new();
+    write(&m.home, "code/shop/backend/package.json", "{}");
+    write(&m.home, "code/shop/backend/.env", "SHOP=1\n");
+    write(&m.home, "work/blog/backend/package.json", "{}");
+    write(&m.home, "work/blog/backend/.env", "BLOG=1\n");
+
+    let out = m
+        .dv()
+        .args(["show", "backend"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let errors: Vec<&str> = stderr.lines().filter(|l| l.starts_with("error:")).collect();
+    assert_eq!(errors.len(), 1, "{stderr}");
+    let line = errors[0].replace('\\', "/");
+    assert!(line.contains("2 projects are named"), "{line}");
+    assert!(line.contains("code/shop/backend/.env"), "{line}");
+    assert!(line.contains("work/blog/backend/.env"), "{line}");
+    // the old message put the paths after an escaped newline: `instead:\n  ~/...`
+    assert!(!errors[0].contains("instead:\\n"), "{}", errors[0]);
+}
+
+#[test]
+fn a_path_given_to_dash_p_says_to_use_dash_f_and_dash_f_works() {
+    let m = Machine::new();
+    let file = m.home.join("code/acme-api/.env");
+
+    m.dv()
+        .args(["get", "PORT", "-p"])
+        .arg(&file)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("pass it with -f instead"));
+
+    m.dv()
+        .args(["get", "PORT", "-f"])
+        .arg(&file)
+        .assert()
+        .success()
+        .stdout("3000\n");
+}
