@@ -119,7 +119,7 @@ fn variant_label(index: usize) -> String {
 pub fn find(ctx: &Ctx, args: FindArgs) -> Result<ExitCode> {
     if ctx.config.roots.is_empty() {
         anstream::eprintln!(
-            "No folders are being scanned and your home folder could not be found; run `dotvault scan <dir>` first."
+            "No folders are being scanned and no disks or home folder could be found; run `dotvault scan <dir>` first."
         );
         return Ok(ExitCode::from(1));
     }

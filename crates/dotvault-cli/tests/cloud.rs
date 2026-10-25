@@ -111,6 +111,7 @@ impl User {
         cmd.env("DOTVAULT_CONFIG_DIR", &self.config)
             .env("DOTVAULT_DATA_DIR", &self.data)
             .env("DOTVAULT_HOME", &self.home)
+            .env("DOTVAULT_SCAN_ROOTS", &self.home)
             .env("DOTVAULT_SERVER", &self.url)
             .env("DOTVAULT_USERNAME", &self.name)
             .env("DOTVAULT_PASSWORD", &self.password)

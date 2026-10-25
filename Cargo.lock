@@ -686,6 +686,7 @@ dependencies = [
  "dunce",
  "globset",
  "ignore",
+ "libc",
  "owo-colors",
  "predicates",
  "rpassword",

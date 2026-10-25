@@ -49,13 +49,26 @@ deploy/                 dotvault.service  Caddyfile  Dockerfile  fly.toml  lites
 
 `scan` walks the remembered folders (roots) in parallel, skipping `node_modules`,
 `.git`, `target` and similar. When no roots exist yet, the first command that
-needs the index (`ls`, `find`, or a project name as a target) saves the home
-folder as the root; `scan --system` adds `/` or the system drive. `discover.rs`
-holds the skip rules that keep broad roots fast and safe: hidden and media
-folders directly inside a home folder, each platform's system folders (exact
-paths, so `/srv/usr` is kept), and on Linux the network and FUSE mounts from
-`/proc/mounts`, which can block. A home folder or filesystem root is never a
-project. A root named explicitly is never skipped, even inside a hidden folder.
+needs the index (`ls`, `find`, or a project name as a target) saves the whole
+computer as the roots and sets `roots_auto = true`: `/` plus local disks under
+`/mnt`, `/media` and `/run/media` on Linux, `/` plus local volumes in `/Volumes`
+on macOS (`statfs` tells them from network shares, with a timeout), and every
+fixed or removable drive on Windows (`GetLogicalDrives` and `GetDriveType`;
+network, optical and RAM drives are left out). While `roots_auto` is true each
+such command recomputes that list and saves it if the disks changed. Naming a
+folder (`scan PATH`, `roots add`, `roots rm`) sets it to false and the list is the
+user's. A config from 0.3 or earlier has no `roots_auto`; exactly `[home]` there
+is the old automatic default and is widened once, anything else is the user's
+(`config::plan_roots`). `DOTVAULT_SCAN_ROOTS` replaces the computed list, which is
+how the tests keep away from the real machine.
+
+`discover.rs` holds the skip rules that keep broad roots fast and safe: hidden
+and media folders directly inside a home folder, each platform's system folders
+(exact paths under every filesystem root, so `/srv/usr` is kept and every
+Windows drive's `$RECYCLE.BIN` is skipped, with Windows names compared ignoring
+case), and on Linux the network and FUSE mounts from `/proc/mounts`, which can
+block. A home folder or filesystem root is never a project. A root named
+explicitly is never skipped, even inside a hidden folder.
 The time a scan took is stored, and slow scans are repeated less often. It keeps
 `.env` and `.env.*` files, marks examples, assigns each file to the nearest
 project folder (never above the scanned folder), and stores locations and

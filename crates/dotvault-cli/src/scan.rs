@@ -322,7 +322,11 @@ mod tests {
 
     fn machine_opts(root: &Path, scan_root: &Path) -> ScanOptions {
         let mut o = opts(scan_root);
-        o.profile = Profile::new(Os::Linux, root, Some(&root.join("home/me")));
+        o.profile = Profile::new(
+            Os::Linux,
+            std::slice::from_ref(&root.to_path_buf()),
+            Some(&root.join("home/me")),
+        );
         o
     }
 

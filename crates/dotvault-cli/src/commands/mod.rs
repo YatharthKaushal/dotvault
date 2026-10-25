@@ -15,7 +15,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::{Cli, Command, TargetFlags};
 use crate::clipboard;
-use crate::config::{Config, Dirs};
+use crate::config::{Config, Dirs, RootsPlan};
 use crate::discover;
 use crate::index::{FileRecord, Index};
 use crate::output::{humanize_secs, now_secs, tilde};
@@ -29,7 +29,7 @@ pub fn run(cli: Cli) -> Result<ExitCode> {
     }
     let mut ctx = Ctx::load()?;
     if cli.command.needs_index() {
-        ctx.bootstrap_roots()?;
+        ctx.prepare_roots()?;
     }
     match cli.command {
         Command::Scan(a) => ls::scan(&mut ctx, a),
@@ -113,24 +113,37 @@ impl Ctx {
         Index::open(&self.dirs.index_file())
     }
 
-    /// With no folders configured, starts with the home folder, so a first
-    /// `dotvault ls` works without setup. Only ever acts when the list is empty;
-    /// returns whether it added anything.
-    fn bootstrap_roots(&mut self) -> Result<bool> {
-        if !self.config.roots.is_empty() {
-            return Ok(false);
-        }
-        let roots = discover::default_roots();
-        if roots.is_empty() {
-            return Ok(false);
-        }
+    /// Makes sure there are folders to search before a command that needs them:
+    /// the whole computer when nothing is saved yet, and the computer's current
+    /// disks while dotvault (not the user) chose the saved folders. Returns
+    /// whether the saved folders changed.
+    fn prepare_roots(&mut self) -> Result<bool> {
+        let default = discover::default_roots();
+        let home = discover::home_dir();
+        let (roots, notice) = match self.config.plan_roots(&default, home.as_deref()) {
+            RootsPlan::Keep => return Ok(false),
+            RootsPlan::Start(roots) => (
+                roots,
+                Some(format!(
+                    "No folders set up yet, so searching {}. The first run can take a minute. Change it with `dotvault roots`.",
+                    discover::default_roots_label()
+                )),
+            ),
+            RootsPlan::Widen(roots) => (
+                roots,
+                Some(format!(
+                    "Now searching {} (it was your home folder only). The first run can take a minute. Change it with `dotvault roots`.",
+                    discover::default_roots_label()
+                )),
+            ),
+            RootsPlan::Refresh(roots) => (roots, None),
+        };
         self.config.roots = roots;
+        self.config.roots_auto = Some(true);
         self.config.save(&self.dirs)?;
-        anstream::eprintln!(
-            "{}",
-            "No folders set up yet, so scanning your home folder. Change it with `dotvault roots`."
-                .dimmed()
-        );
+        if let Some(notice) = notice {
+            anstream::eprintln!("{}", notice.dimmed());
+        }
         Ok(true)
     }
 
@@ -246,7 +259,7 @@ pub fn resolve_target(
         }
         Target::Project { name, env } => {
             if ctx.config.roots.is_empty() {
-                bail!("no folders are being scanned and your home folder could not be found; run `dotvault scan <dir>` first, or pass a file path");
+                bail!("no folders are being scanned and no disks or home folder could be found; run `dotvault scan <dir>` first, or pass a file path");
             }
             let records = ctx.records(false)?;
             let rec = resolve::pick(&records, &name, env.as_deref(), opts.include_examples)?;

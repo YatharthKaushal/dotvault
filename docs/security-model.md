@@ -120,14 +120,14 @@ data is unrecoverable by design. Your local files are never affected.
 
 | File | Contents | Protection |
 |---|---|---|
-| `config.toml` | server URL, scanned folders (your home folder by default), settings | none needed, no secrets |
+| `config.toml` | server URL, scanned folders (the whole computer by default), settings | none needed, no secrets |
 | `index.db` | paths and **variable names** of env files, never values | disposable cache |
 | `session.json` | server, username, session token, wrapped vault key, and (by default) the vault key | mode `0600` on Unix, written atomically; a warning is printed if it is loosened |
 
 * Finding files reads env files on your machine to list their variable names. It
   makes no network request, and values are never written to `index.db`. A scan of
-  the home folder or the whole machine reads more files than a scan of one project
-  folder, but stores the same thing.
+  the whole computer, which is the default, reads more files than a scan of one
+  project folder, but stores the same thing: paths and variable names.
 * `dotvault get KEY -c` puts a value on the system clipboard. The clipboard is
   shared with every program you run, so the value is there for up to 30 seconds
   and is cleared only if it is still the same text. A helper process holds it

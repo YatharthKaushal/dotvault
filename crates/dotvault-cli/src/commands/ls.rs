@@ -15,22 +15,27 @@ use crate::filter::{Filter, FilterArgs};
 use crate::index::FileRecord;
 use crate::output::{age, now_secs, plural, print_json, stdout, tilde, Cell, Style, Table};
 
-const FIRST_RUN_HINT: &str = "No folders are being scanned and your home folder could not be found. Point dotvault at the folder that holds your projects:\n\n  dotvault scan ~/code\n";
+const FIRST_RUN_HINT: &str = "No folders are being scanned and no disks or home folder could be found. Point dotvault at the folder that holds your projects:\n\n  dotvault scan ~/code\n";
 
 pub fn scan(ctx: &mut Ctx, args: ScanArgs) -> Result<ExitCode> {
+    // Naming a folder as the very first thing keeps the search to that folder.
+    // Otherwise start from the whole computer, or bring an automatic list up to date.
+    if !(ctx.config.roots.is_empty() && !args.paths.is_empty()) {
+        ctx.prepare_roots()?;
+    }
     if args.system {
-        add_roots(ctx, &discover::system_roots())?;
+        // Adds what an automatic list already holds, so only a user-named list grows.
+        add_roots(ctx, &discover::default_roots(), false)?;
         anstream::eprintln!(
             "{}",
-            "Searching the whole machine (system folders are skipped). This can take a minute."
+            "Searching the whole computer (system folders are skipped). This can take a minute."
                 .dimmed()
         );
     }
     if !args.paths.is_empty() {
-        add_roots(ctx, &args.paths)?;
+        add_roots(ctx, &args.paths, true)?;
     }
-    // Nothing named and nothing remembered: start with the home folder.
-    if ctx.config.roots.is_empty() && !ctx.bootstrap_roots()? {
+    if ctx.config.roots.is_empty() {
         anstream::eprintln!("{FIRST_RUN_HINT}");
         return Ok(ExitCode::from(1));
     }
@@ -76,7 +81,7 @@ pub fn scan(ctx: &mut Ctx, args: ScanArgs) -> Result<ExitCode> {
 pub fn roots(ctx: &mut Ctx, command: RootsCommand) -> Result<ExitCode> {
     match command {
         RootsCommand::Add { paths } => {
-            let added = add_roots(ctx, &paths)?;
+            let added = add_roots(ctx, &paths, true)?;
             anstream::println!(
                 "Remembered {}. Run `dotvault scan` to index {}.",
                 plural(added, "new folder"),
@@ -97,13 +102,14 @@ pub fn roots(ctx: &mut Ctx, command: RootsCommand) -> Result<ExitCode> {
                 }
                 removed += before - ctx.config.roots.len();
             }
+            ctx.config.mark_roots_explicit();
             ctx.config.save(&ctx.dirs)?;
             anstream::println!("Forgot {}.", plural(removed, "folder"));
         }
         RootsCommand::Ls => {
             if ctx.config.roots.is_empty() {
                 anstream::eprintln!(
-                    "No folders set up yet. The first command that needs them uses your home folder, or add one with `dotvault scan <dir>`."
+                    "No folders set up yet. The first command that needs them searches your whole computer, or add one with `dotvault scan <dir>`."
                 );
                 return Ok(ExitCode::SUCCESS);
             }
@@ -121,11 +127,16 @@ pub fn roots(ctx: &mut Ctx, command: RootsCommand) -> Result<ExitCode> {
 }
 
 /// Canonicalizes, de-duplicates and saves new scan roots. Returns how many were new.
-fn add_roots(ctx: &mut Ctx, paths: &[PathBuf]) -> Result<usize> {
+/// Adds folders to the saved list. `named_by_user` is for folders the user typed:
+/// the list is then theirs and dotvault stops managing it.
+fn add_roots(ctx: &mut Ctx, paths: &[PathBuf], named_by_user: bool) -> Result<usize> {
     let mut added = 0;
     for p in paths {
-        let canonical = crate::fsutil::canonical(p)
-            .with_context(|| format!("cannot access {}", p.display()))?;
+        let canonical = match crate::fsutil::canonical(p) {
+            Ok(canonical) => canonical,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => bail!("{}", not_a_folder(p)),
+            Err(e) => return Err(e).with_context(|| format!("cannot access {}", p.display())),
+        };
         if !canonical.is_dir() {
             bail!("{} is not a folder", p.display());
         }
@@ -135,9 +146,24 @@ fn add_roots(ctx: &mut Ctx, paths: &[PathBuf]) -> Result<usize> {
         }
     }
     if added > 0 {
+        if named_by_user {
+            ctx.config.mark_roots_explicit();
+        }
         ctx.config.save(&ctx.dirs)?;
     }
     Ok(added)
+}
+
+/// What to say when `scan NAME` finds no such folder. A bare word is most likely
+/// a project name, which `scan` does not take.
+fn not_a_folder(path: &std::path::Path) -> String {
+    let shown = path.display();
+    let bare = path.components().count() == 1 && !path.has_root();
+    if bare {
+        format!("{shown} is not a folder here. `scan` searches folders; to look at a project use `dotvault show {shown}`")
+    } else {
+        format!("no folder at {shown}")
+    }
 }
 
 pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {

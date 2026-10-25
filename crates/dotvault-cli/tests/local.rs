@@ -79,6 +79,7 @@ impl Sandbox {
         cmd.env("DOTVAULT_CONFIG_DIR", &self.config)
             .env("DOTVAULT_DATA_DIR", &self.data)
             .env("DOTVAULT_HOME", &self.home)
+            .env("DOTVAULT_SCAN_ROOTS", &self.home)
             .env("NO_COLOR", "1")
             .env_remove("VISUAL")
             .env_remove("EDITOR")
@@ -243,7 +244,7 @@ fn roots_add_and_rm() {
         .args(["scan", "no-such-dir"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("cannot access"));
+        .stderr(predicate::str::contains("no-such-dir is not a folder here"));
 }
 
 // --- show / get ----------------------------------------------------------------

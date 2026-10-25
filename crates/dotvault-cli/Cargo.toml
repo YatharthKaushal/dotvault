@@ -36,7 +36,16 @@ zeroize = "1.9.1"
 # Already in the tree through arboard; used to keep the clipboard helper from
 # inheriting this program's output pipe.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console"] }
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_Debug",
+] }
+
+# Already in the tree through other crates; used to tell local disks from network shares.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.191"
 
 [dev-dependencies]
 assert_cmd = "2.2.2"

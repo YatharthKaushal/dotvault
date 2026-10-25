@@ -1,7 +1,8 @@
 //! First-run discovery: with no folders configured, commands that need the list
-//! of env files look in the home folder on their own. A fixture folder stands in
-//! for home through `DOTVAULT_HOME`, which also works on Windows, where the OS
-//! decides where the real one is.
+//! of env files search the whole computer on their own. Tests never do: a fixture
+//! folder stands in for home through `DOTVAULT_HOME`, and `DOTVAULT_SCAN_ROOTS`
+//! stands in for the computer's disks (both also work on Windows, where the OS
+//! decides where the real ones are).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-const NOTICE: &str = "scanning your home folder";
+const NOTICE: &str = "No folders set up yet";
 
 fn write(root: &Path, rel: &str, contents: &str) {
     let p = root.join(rel);
@@ -22,6 +23,8 @@ fn write(root: &Path, rel: &str, contents: &str) {
 struct Machine {
     _tmp: TempDir,
     home: PathBuf,
+    /// A second "disk": a folder outside home with one project in it.
+    disk: PathBuf,
     config: PathBuf,
     data: PathBuf,
 }
@@ -42,10 +45,14 @@ impl Machine {
         write(&home, ".config/tool/.env", "HIDDEN=1\n");
         write(&home, ".local/share/app/.env", "HIDDEN=2\n");
         write(&home, "Pictures/trip/.env", "MEDIA=1\n");
+        let disk = tmp.path().join("disk");
+        write(&disk, "shop/package.json", "{}");
+        write(&disk, "shop/.env", "SHOP=1\n");
         Machine {
             config: tmp.path().join("config"),
             data: tmp.path().join("data"),
             home,
+            disk,
             _tmp: tmp,
         }
     }
@@ -53,12 +60,20 @@ impl Machine {
     fn dv(&self) -> Command {
         let mut cmd = cargo_bin_cmd!("dotvault");
         cmd.env("DOTVAULT_HOME", &self.home)
+            .env("DOTVAULT_SCAN_ROOTS", &self.home)
             .env("DOTVAULT_CONFIG_DIR", &self.config)
             .env("DOTVAULT_DATA_DIR", &self.data)
             .env("NO_COLOR", "1")
             .env_remove("VISUAL")
             .env_remove("EDITOR")
             .current_dir(&self.home);
+        cmd
+    }
+
+    /// Like [`Machine::dv`] on a computer whose disks are `roots`.
+    fn dv_on(&self, roots: &[&Path]) -> Command {
+        let mut cmd = self.dv();
+        cmd.env("DOTVAULT_SCAN_ROOTS", std::env::join_paths(roots).unwrap());
         cmd
     }
 
@@ -343,4 +358,276 @@ fn a_path_given_to_dash_p_says_to_use_dash_f_and_dash_f_works() {
         .assert()
         .success()
         .stdout("3000\n");
+}
+
+/// Forgets who chose the saved folders, the way a config written by 0.2 or 0.3 is.
+fn make_legacy(m: &Machine) {
+    let path = m.config.join("config.toml");
+    let text = fs::read_to_string(&path).unwrap();
+    let kept: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.starts_with("roots_auto"))
+        .collect();
+    fs::write(&path, kept.join("\n") + "\n").unwrap();
+    assert!(!m.config_text().contains("roots_auto"));
+}
+
+fn project_files(lines: &[String]) -> Vec<String> {
+    let mut v: Vec<String> = lines
+        .iter()
+        .map(|l| l.rsplit('/').nth(1).unwrap_or("").to_string())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+#[test]
+fn the_first_run_saves_that_dotvault_chose_the_folders() {
+    let m = Machine::new();
+    m.dv().arg("ls").assert().success();
+    assert!(
+        m.config_text().contains("roots_auto = true"),
+        "{}",
+        m.config_text()
+    );
+}
+
+#[test]
+fn a_home_only_config_from_an_older_version_is_widened_once_and_says_so() {
+    let m = Machine::new();
+    let home = m.home.clone();
+    m.dv().arg("scan").arg(&home).assert().success(); // what 0.3 saved for a first run
+    make_legacy(&m);
+
+    let on = [m.home.as_path(), m.disk.as_path()];
+    m.dv_on(&on)
+        .args(["ls", "--paths"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Now searching"))
+        .stderr(predicate::str::contains("it was your home folder only"));
+    let lines = {
+        let out = m
+            .dv_on(&on)
+            .args(["ls", "--paths"])
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+        assert!(
+            !String::from_utf8_lossy(&out.stderr).contains("Now searching"),
+            "the notice is shown once"
+        );
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(|l| l.replace('\\', "/"))
+            .collect::<Vec<_>>()
+    };
+    assert!(has(&lines, "shop/.env"), "{lines:#?}");
+    assert!(has(&lines, "code/acme-api/.env"), "{lines:#?}");
+    assert!(
+        m.config_text().contains("roots_auto = true"),
+        "{}",
+        m.config_text()
+    );
+}
+
+#[test]
+fn a_bare_scan_widens_an_older_home_only_config_too() {
+    let m = Machine::new();
+    let home = m.home.clone();
+    m.dv().arg("scan").arg(&home).assert().success();
+    make_legacy(&m);
+    let on = [m.home.as_path(), m.disk.as_path()];
+    m.dv_on(&on)
+        .arg("scan")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Now searching"))
+        .stdout(predicate::str::contains("2 folders"));
+}
+
+#[test]
+fn other_folders_in_an_older_config_are_left_alone() {
+    let m = Machine::new();
+    let web = m.home.join("code/web");
+    m.dv().arg("scan").arg(&web).assert().success();
+    make_legacy(&m);
+    let on = [m.home.as_path(), m.disk.as_path()];
+    let out = m
+        .dv_on(&on)
+        .args(["ls", "--paths"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("Now searching"));
+    let lines: Vec<String> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+    assert_eq!(project_files(&lines).len(), 1, "{lines:#?}");
+}
+
+#[test]
+fn folders_the_user_named_are_never_replaced_by_the_computers_disks() {
+    let m = Machine::new();
+    let web = m.home.join("code/web");
+    m.dv().arg("scan").arg(&web).assert().success();
+    assert!(
+        m.config_text().contains("roots_auto = false"),
+        "{}",
+        m.config_text()
+    );
+    let on = [m.home.as_path(), m.disk.as_path()];
+    let out = m
+        .dv_on(&on)
+        .args(["ls", "--paths"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("Now searching"));
+    let lines: Vec<String> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| l.replace('\\', "/"))
+        .collect();
+    assert_eq!(lines.len(), 1, "{lines:#?}");
+    assert!(has(&lines, "code/web/.env.local"));
+}
+
+#[test]
+fn naming_a_folder_after_the_automatic_start_takes_the_list_over() {
+    let m = Machine::new();
+    m.dv().arg("ls").assert().success(); // automatic: [home]
+    let disk = m.disk.clone();
+    m.dv().arg("scan").arg(&disk).assert().success(); // the user adds a folder
+    assert!(
+        m.config_text().contains("roots_auto = false"),
+        "{}",
+        m.config_text()
+    );
+    // a disk appearing later is not added behind the user's back
+    let both = [m.home.as_path(), m.disk.as_path()];
+    m.dv_on(&both)
+        .args(["roots", "rm"])
+        .arg(&disk)
+        .assert()
+        .success();
+    let out = m
+        .dv_on(&both)
+        .args(["ls", "--paths"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let lines: Vec<String> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| l.replace('\\', "/"))
+        .collect();
+    assert!(!has(&lines, "shop/.env"), "{lines:#?}");
+}
+
+#[test]
+fn an_automatic_list_follows_disks_as_they_come_and_go() {
+    let m = Machine::new();
+    m.dv().args(["ls", "--paths"]).assert().success(); // [home]
+
+    let both = [m.home.as_path(), m.disk.as_path()];
+    let plugged = {
+        let out = m
+            .dv_on(&both)
+            .args(["ls", "--paths"])
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+        assert!(
+            !String::from_utf8_lossy(&out.stderr).contains(NOTICE),
+            "following a new disk is quiet"
+        );
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(|l| l.replace('\\', "/"))
+            .collect::<Vec<_>>()
+    };
+    assert!(has(&plugged, "shop/.env"), "{plugged:#?}");
+
+    // unplugged again
+    assert!(!has(&m.listed(), "shop/.env"));
+}
+
+#[test]
+fn scan_system_adds_the_computers_disks_to_a_list_the_user_named() {
+    let m = Machine::new();
+    let web = m.home.join("code/web");
+    m.dv().arg("scan").arg(&web).assert().success();
+    let disk_only = [m.disk.as_path()];
+    m.dv_on(&disk_only)
+        .args(["scan", "--system"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Searching the whole computer"));
+    let out = m
+        .dv()
+        .args(["ls", "--paths"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let lines: Vec<String> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| l.replace('\\', "/"))
+        .collect();
+    assert!(has(&lines, "code/web/.env.local"), "{lines:#?}");
+    assert!(has(&lines, "shop/.env"), "{lines:#?}");
+    assert!(
+        m.config_text().contains("roots_auto = false"),
+        "{}",
+        m.config_text()
+    );
+}
+
+#[test]
+fn scan_with_a_project_name_says_scan_takes_folders() {
+    let m = Machine::new();
+    m.dv().arg("ls").assert().success();
+    m.dv()
+        .args(["scan", "acme-api"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("acme-api is not a folder here"))
+        .stderr(predicate::str::contains("dotvault show acme-api"))
+        .stderr(predicate::str::contains("os error").not());
+}
+
+#[test]
+fn scan_with_a_path_that_does_not_exist_names_the_path() {
+    let m = Machine::new();
+    m.dv()
+        .args(["scan", "no/such/folder"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no folder at"))
+        .stderr(predicate::str::contains("show").not());
+}
+
+#[test]
+fn the_first_run_notice_says_where_it_is_looking_and_that_it_can_take_a_while() {
+    let m = Machine::new();
+    m.dv()
+        .arg("ls")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "the folders in DOTVAULT_SCAN_ROOTS",
+        ))
+        .stderr(predicate::str::contains("can take a minute"));
 }

@@ -42,6 +42,7 @@ impl Fixture {
     fn dv(&self, secs: u64) -> Command {
         let mut cmd = cargo_bin_cmd!("dotvault");
         cmd.env("DOTVAULT_HOME", self.tmp.path().join("home"))
+            .env("DOTVAULT_SCAN_ROOTS", self.tmp.path().join("home"))
             .env("DOTVAULT_CONFIG_DIR", self.tmp.path().join("config"))
             .env("DOTVAULT_DATA_DIR", self.tmp.path().join("data"))
             .env("DOTVAULT_CLIPBOARD_FILE", &self.clip)

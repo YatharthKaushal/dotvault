@@ -29,7 +29,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Find env files under folders and remember those folders (default: your home folder)
+    /// Find env files under folders and remember those folders (default: the whole computer)
     Scan(ScanArgs),
     /// Manage the folders that are searched
     Roots {
@@ -126,7 +126,7 @@ pub struct ScanArgs {
     /// How many directory levels to descend
     #[arg(long, value_name = "N")]
     pub depth: Option<usize>,
-    /// Also search the whole machine (system folders are skipped; this can take a minute)
+    /// Also search the whole computer, every drive (system folders are skipped; this can take a minute)
     #[arg(long)]
     pub system: bool,
 }
