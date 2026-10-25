@@ -404,12 +404,17 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode(&target), 0o600, "the sender's 0644 is not copied");
-
-            // replacing a more permissive file leaves an owner-only one
+            // a more permissive file that is about to be replaced
             std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
-            write_secret_file(&target, &file(b"new"), true).unwrap();
-            assert_eq!(mode(&target), 0o600);
         }
+        write_secret_file(&target, &file(b"new"), true).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "replacing leaves an owner-only file");
+        }
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
 
         let err = write_secret_file(&target, &file(b"newer"), false)
             .unwrap_err()
