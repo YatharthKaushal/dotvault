@@ -166,6 +166,8 @@ mod tests {
             size: 0,
             mtime: 0,
             keys: vec![],
+            kind: dotvault_core::secrets::Kind::Env,
+            detail: String::new(),
         }
     }
 

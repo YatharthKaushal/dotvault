@@ -9,9 +9,14 @@ use sha2::{Digest, Sha256};
 /// Six hex characters. Equal values always give equal tags; different values
 /// differ except for about one pair in sixteen million.
 pub fn fingerprint(value: &str) -> String {
+    fingerprint_bytes(value.as_bytes())
+}
+
+/// The same tag for arbitrary bytes, such as the contents of a key file.
+pub fn fingerprint_bytes(value: &[u8]) -> String {
     let mut hash = Sha256::new();
     hash.update(b"dotvault-fingerprint\0");
-    hash.update(value.as_bytes());
+    hash.update(value);
     let digest = hash.finalize();
     digest.iter().take(3).map(|b| format!("{b:02x}")).collect()
 }
@@ -25,6 +30,15 @@ mod tests {
         assert_eq!(fingerprint("postgres://x"), fingerprint("postgres://x"));
         assert_ne!(fingerprint("postgres://x"), fingerprint("postgres://y"));
         assert_ne!(fingerprint(""), fingerprint(" "));
+    }
+
+    #[test]
+    fn bytes_and_text_agree_and_binary_data_works() {
+        assert_eq!(fingerprint("abc"), fingerprint_bytes(b"abc"));
+        assert_ne!(
+            fingerprint_bytes(&[0, 255, 0]),
+            fingerprint_bytes(&[0, 255, 1])
+        );
     }
 
     #[test]

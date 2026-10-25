@@ -2,21 +2,22 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use dotvault_core::api::{
     CreateItemRequest, ItemDetail, ListItemsResponse, UpdateItemRequest, MAX_ITEM_NAME_BYTES,
     MAX_ITEM_PAYLOAD_BYTES,
 };
 use dotvault_core::crypto::{self, derive_account_keys, unlock_with_password, Key};
 use dotvault_core::dotenv::DotEnv;
-use dotvault_core::payload::EnvPayload;
+use dotvault_core::fingerprint::fingerprint_bytes;
+use dotvault_core::payload::{EnvPayload, FilePayload, Payload};
 use dotvault_core::share_code;
 use owo_colors::OwoColorize;
 
 use super::{read_text, Ctx};
 use crate::client::{normalize_server, Api, ApiError};
 use crate::fsutil;
-use crate::output::{plural, tilde};
+use crate::output::{plural, sanitize, tilde};
 use crate::prompt;
 use crate::session::{Session, SessionStore};
 
@@ -149,7 +150,7 @@ impl Cloud {
         Ok((items, undecryptable))
     }
 
-    pub fn read_item(&self, vault_key: &Key, item: &ItemMeta) -> Result<EnvPayload> {
+    pub fn read_item(&self, vault_key: &Key, item: &ItemMeta) -> Result<Payload> {
         let detail: ItemDetail = self
             .api
             .get(&format!("/vault/items/{}", item.id))
@@ -164,12 +165,12 @@ impl Cloud {
 
     /// Creates the item, or adds a new version when `existing` is given.
     /// Returns the item id and its version.
-    pub fn write_item(
+    pub fn write_item<T: serde::Serialize>(
         &self,
         vault_key: &Key,
         existing: Option<&ItemMeta>,
         name: &str,
-        payload: &EnvPayload,
+        payload: &T,
     ) -> Result<(String, u32)> {
         let id = match existing {
             Some(e) => e.id.clone(),
@@ -216,6 +217,83 @@ impl Cloud {
     }
 }
 
+/// A file this large cannot fit in a vault item once sealed, so it is not even read.
+const MAX_FILE_READ: u64 = MAX_ITEM_PAYLOAD_BYTES as u64;
+
+/// Reads a whole file into a payload that can be sealed into the vault or a share.
+pub fn file_payload(path: &Path, secret_kind: &str, source: &str) -> Result<FilePayload> {
+    let md = std::fs::metadata(path).with_context(|| format!("cannot read {}", tilde(path)))?;
+    if !md.is_file() {
+        bail!("{} is not a file", tilde(path));
+    }
+    if md.len() > MAX_FILE_READ {
+        bail!(
+            "{} is {} KiB; the vault holds files up to about {} KiB",
+            tilde(path),
+            md.len() / 1024,
+            MAX_ITEM_PAYLOAD_BYTES * 3 / 4 / 1024
+        );
+    }
+    let data = std::fs::read(path).with_context(|| format!("cannot read {}", tilde(path)))?;
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::PermissionsExt;
+        Some(md.permissions().mode() & 0o777)
+    };
+    #[cfg(not(unix))]
+    let mode = None;
+    let name = path
+        .file_name()
+        .map_or_else(|| "file".to_string(), |n| n.to_string_lossy().into_owned());
+    Ok(FilePayload::new(name, secret_kind, mode, data, source))
+}
+
+/// `ssh-key, 411 bytes`, safe to print.
+pub fn describe_file(file: &FilePayload) -> String {
+    let kind = if file.secret_kind.is_empty() {
+        "file"
+    } else {
+        &file.secret_kind
+    };
+    format!("{}, {} bytes", sanitize(kind), file.size)
+}
+
+/// A short tag of the file's bytes, so two copies can be compared without opening them.
+pub fn file_tag(file: &FilePayload) -> String {
+    fingerprint_bytes(&file.data)
+}
+
+/// Writes a file received from the vault or a share, exactly as it was and readable
+/// only by you. The sender's file name is never used: the destination is yours.
+pub fn write_secret_file(path: &Path, file: &FilePayload, force: bool) -> Result<String> {
+    if !file.is_consistent() {
+        bail!("the file arrived damaged (its size does not match); nothing was written");
+    }
+    if path.is_dir() {
+        bail!("{} is a directory", path.display());
+    }
+    if let Some(folder) = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty() && !p.is_dir())
+    {
+        bail!(
+            "the folder {} does not exist; create it first",
+            tilde(folder)
+        );
+    }
+    if path.exists() && !force {
+        bail!("{} already exists; add --force to replace it", tilde(path));
+    }
+    fsutil::write_private(path, &file.data)
+        .with_context(|| format!("cannot write {}", tilde(path)))?;
+    Ok(format!(
+        "Wrote {} ({}) to {}, readable only by you",
+        sanitize(&file.name),
+        describe_file(file),
+        tilde(path)
+    ))
+}
+
 /// Exact name, then case-insensitive, then a unique substring.
 pub fn find_item<'a>(items: &'a [ItemMeta], wanted: &str) -> Result<&'a ItemMeta> {
     if let Some(i) = items.iter().find(|i| i.name == wanted) {
@@ -249,7 +327,7 @@ pub fn check_write_target(path: &Path, force: bool, merge: bool) -> Result<()> {
     }
     if path.exists() && !force && !merge {
         bail!(
-            "{} already exists; add --merge to add the variables to it, or --force to replace it",
+            "{} already exists; add --force to replace it (or --merge to add variables to an env file)",
             tilde(path)
         );
     }
@@ -299,6 +377,103 @@ pub fn write_env_file(
 mod tests {
     use super::*;
     use dotvault_core::payload::EnvEntry;
+
+    fn file(data: &[u8]) -> FilePayload {
+        FilePayload::new(
+            "id_ed25519",
+            "ssh-key",
+            Some(0o644),
+            data.to_vec(),
+            "keys/id",
+        )
+    }
+
+    #[test]
+    fn a_received_file_is_written_exactly_privately_and_never_over_another_by_accident() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("key");
+        let bytes: Vec<u8> = (0..=255u8).collect();
+        let message = write_secret_file(&target, &file(&bytes), false).unwrap();
+        assert!(
+            message.contains("readable only by you") && message.contains("ssh-key"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), bytes);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&target), 0o600, "the sender's 0644 is not copied");
+
+            // replacing a more permissive file leaves an owner-only one
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+            write_secret_file(&target, &file(b"new"), true).unwrap();
+            assert_eq!(mode(&target), 0o600);
+        }
+
+        let err = write_secret_file(&target, &file(b"newer"), false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("already exists") && err.contains("--force"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"new",
+            "the existing file is untouched"
+        );
+        write_secret_file(&target, &file(b"newer"), true).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"newer");
+    }
+
+    #[test]
+    fn a_received_file_is_refused_when_it_cannot_be_written_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = write_secret_file(&dir.path().join("nope/key"), &file(b"x"), false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("does not exist; create it first"), "{err}");
+        let err = write_secret_file(dir.path(), &file(b"x"), true)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("is a directory"), "{err}");
+        let mut lying = file(b"12345");
+        lying.size = 99;
+        let target = dir.path().join("k");
+        let err = write_secret_file(&target, &lying, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("damaged"), "{err}");
+        assert!(!target.exists(), "nothing is written for a damaged file");
+    }
+
+    #[test]
+    fn a_file_is_read_whole_with_its_name_and_never_when_it_is_too_big() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("release.jks");
+        std::fs::write(&path, [0xFE, 0xED, 0, 255]).unwrap();
+        let payload = file_payload(&path, "keystore", "proj/release.jks").unwrap();
+        assert_eq!(
+            (payload.name.as_str(), payload.size, payload.data.clone()),
+            ("release.jks", 4, vec![0xFE, 0xED, 0, 255])
+        );
+        assert_eq!(describe_file(&payload), "keystore, 4 bytes");
+        assert_eq!(file_tag(&payload), file_tag(&payload.clone()));
+
+        let big = dir.path().join("big");
+        std::fs::write(&big, vec![0u8; MAX_FILE_READ as usize + 1]).unwrap();
+        let err = file_payload(&big, "file", "s").unwrap_err().to_string();
+        assert!(
+            err.contains("KiB") && err.contains("vault holds files up to"),
+            "{err}"
+        );
+        assert!(
+            file_payload(dir.path(), "file", "s").is_err(),
+            "a folder is not a file"
+        );
+        assert!(file_payload(&dir.path().join("missing"), "file", "s").is_err());
+    }
 
     fn items(names: &[&str]) -> Vec<ItemMeta> {
         names

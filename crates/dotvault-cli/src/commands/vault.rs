@@ -9,7 +9,7 @@ use dotvault_core::classify::{
     classify, find_project_root, project_name, ClassifyOptions, PROJECT_MARKERS,
 };
 use dotvault_core::dotenv::DotEnv;
-use dotvault_core::payload::EnvPayload;
+use dotvault_core::payload::{EnvPayload, FilePayload, Payload};
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
@@ -69,6 +69,12 @@ pub fn push(ctx: &Ctx, args: PushArgs) -> Result<ExitCode> {
             may_create: false,
         },
     )?;
+    // An SSH key, keystore or secret JSON is stored whole, as a file.
+    let detected = super::secrets::secret_at(ctx, &path);
+    if args.as_file || detected.is_some() {
+        let kind = detected.map_or("file", |d| d.kind.as_str());
+        return push_file(ctx, &path, args.name, kind);
+    }
     let env = DotEnv::parse(&read_text(&path, false)?);
     let name = args.name.unwrap_or_else(|| default_item_name(ctx, &path));
     if name.trim().is_empty() || name.chars().count() > 200 {
@@ -97,6 +103,44 @@ pub fn push(ctx: &Ctx, args: PushArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// `project/file name`, e.g. `acme-api/id_ed25519`.
+pub(super) fn default_file_item_name(ctx: &Ctx, path: &Path) -> String {
+    let env_style = default_item_name(ctx, path);
+    let folder = env_style.split('/').next().unwrap_or("files");
+    let file = path
+        .file_name()
+        .map_or_else(|| "file".to_string(), |n| n.to_string_lossy().into_owned());
+    sanitize(&format!("{folder}/{file}")).into_owned()
+}
+
+fn push_file(ctx: &Ctx, path: &Path, name: Option<String>, kind: &str) -> Result<ExitCode> {
+    let name = name.unwrap_or_else(|| default_file_item_name(ctx, path));
+    if name.trim().is_empty() || name.chars().count() > 200 {
+        bail!("the name must be 1-200 characters");
+    }
+    let file = super::cloud::file_payload(path, kind, &name)?;
+    let cloud = ctx.cloud()?;
+    let vault_key = cloud.vault_key()?;
+    let (items, _) = cloud.items(&vault_key)?;
+    let existing = items.iter().find(|i| i.name == name);
+    let (_, version) = cloud.write_item(&vault_key, existing, &name, &file)?;
+    anstream::println!(
+        "Pushed {} (v{version}, {})",
+        name.bold(),
+        super::cloud::describe_file(&file)
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Why variable-only options do not apply to this item.
+fn file_item_error(item: &str, file: &FilePayload, what: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{} is a file ({}), not a set of variables; {what}",
+        sanitize(item),
+        super::cloud::describe_file(file)
+    )
+}
+
 pub fn pull(ctx: &Ctx, args: PullArgs) -> Result<ExitCode> {
     if args.out.is_none() && !args.stdout {
         bail!(
@@ -112,7 +156,10 @@ pub fn pull(ctx: &Ctx, args: PullArgs) -> Result<ExitCode> {
     let vault_key = cloud.vault_key()?;
     let (items, _) = cloud.items(&vault_key)?;
     let item = find_item(&items, &args.name)?;
-    let payload = filter_keys(cloud.read_item(&vault_key, item)?, &args.keys, &item.name)?;
+    let payload = match cloud.read_item(&vault_key, item)? {
+        Payload::Env(env) => filter_keys(env, &args.keys, &item.name)?,
+        Payload::File(file) => return pull_file(&args, &item.name, &file),
+    };
 
     match &args.out {
         Some(out) => {
@@ -135,6 +182,27 @@ pub fn pull(ctx: &Ctx, args: PullArgs) -> Result<ExitCode> {
             )?;
         }
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn pull_file(args: &PullArgs, item: &str, file: &FilePayload) -> Result<ExitCode> {
+    if !args.keys.is_empty() {
+        return Err(file_item_error(item, file, "--keys does not apply"));
+    }
+    if args.merge {
+        return Err(file_item_error(item, file, "a file cannot be merged"));
+    }
+    let Some(out) = &args.out else {
+        return Err(file_item_error(
+            item,
+            file,
+            "write it with --out PATH (it is never printed)",
+        ));
+    };
+    anstream::println!(
+        "{}",
+        super::cloud::write_secret_file(out, file, args.force)?
+    );
     Ok(ExitCode::SUCCESS)
 }
 
@@ -194,7 +262,38 @@ pub fn vault(ctx: &Ctx, command: VaultCommand) -> Result<ExitCode> {
             let vault_key = cloud.vault_key()?;
             let (items, _) = cloud.items(&vault_key)?;
             let item = find_item(&items, &name)?;
-            let payload = filter_keys(cloud.read_item(&vault_key, item)?, &keys, &item.name)?;
+            let payload = match cloud.read_item(&vault_key, item)? {
+                Payload::Env(env) => filter_keys(env, &keys, &item.name)?,
+                Payload::File(file) => {
+                    if !keys.is_empty() {
+                        return Err(file_item_error(&item.name, &file, "--keys does not apply"));
+                    }
+                    let mut out = stdout().lock();
+                    writeln!(
+                        out,
+                        "{}",
+                        format!("vault: {} (v{})", sanitize(&item.name), item.version).dimmed()
+                    )?;
+                    for (label, value) in [
+                        ("kind", sanitize(&file.secret_kind).into_owned()),
+                        ("file", sanitize(&file.name).into_owned()),
+                        ("size", format!("{} bytes", file.size)),
+                        ("fingerprint", super::cloud::file_tag(&file)),
+                    ] {
+                        writeln!(out, "{:<12}{value}", label.dimmed())?;
+                    }
+                    writeln!(
+                        out,
+                        "{}",
+                        format!(
+                            "a file is never printed; get it with `dotvault pull {} --out PATH`",
+                            sanitize(&item.name)
+                        )
+                        .dimmed()
+                    )?;
+                    return Ok(ExitCode::SUCCESS);
+                }
+            };
             let pairs: Vec<(String, String)> = payload
                 .entries
                 .iter()

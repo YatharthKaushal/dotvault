@@ -96,6 +96,49 @@ use XWayland. Debug builds read `DOTVAULT_CLIPBOARD_FILE` and
 `DOTVAULT_CLIPBOARD_SECS` so the tests never touch a real clipboard; release
 builds ignore both.
 
+## Secret files
+
+`dotvault-core/src/secrets.rs` is pure (no I/O) and works in two stages so a scan
+over millions of files stays cheap. `candidate(name, parent, size)` looks only at
+the file name and size, allocates nothing and asks for the parent folder's name
+only when a rule needs it, and answers how much to read (nothing, 16 bytes of
+magic, up to 16 KiB, or a whole file up to 64 KiB). `confirm(candidate, name,
+bytes)` decides from those bytes: PEM and OpenSSH private-key blocks (the OpenSSH
+container is parsed for algorithm and cipher), keystore magic numbers, a JSON
+object inspected with `serde_json` (invalid, non-object and oversize JSON are not
+secrets; its depth limit makes hostile files safe), and line rules for the
+credential dotfiles. Placeholders (`${TOKEN}`, `<token>`, empty values) never
+count. The result is a `Kind`, a short detail string and, for JSON, the sorted
+top-level key names. Nothing else survives.
+
+The walker in `scan.rs` calls `classify` for env files first and `secret_found`
+for everything else. `secret_found` skips directories and names that are not
+candidates before any I/O, then stats, reads and confirms. `Marks` (the config's
+`marked` and `unmarked` paths, behind a file-name set so most files cost one hash
+lookup) decide first: unmarked wins, then marked, then detection. The index
+stores `kind` and `detail` next to the env fields (schema version 2; an older
+index is rebuilt). **`Ctx::records()` returns env files only**, so project
+selectors, `find` and `diff` cannot see secret files; `Ctx::all_records()` serves
+`ls --secrets`. `refresh_record` re-runs detection for a changed secret file, and
+a file that stopped being one drops out.
+
+`discover.rs` adds the credential folders that exist (`~/.ssh`, `~/.aws`,
+`~/.docker`, `~/.kube`, `~/.config/gcloud` or `%APPDATA%\gcloud`) to the default
+roots, because the hidden-folder rule would skip them; `DOTVAULT_SCAN_ROOTS`
+replaces everything as before.
+
+Cloud storage and sharing reuse the existing encrypted item and share formats:
+`Payload` (in `payload.rs`) is `Env(EnvPayload)` or `File(FilePayload)`, serialized
+untagged so variables look exactly as before and a file carries `"kind": "file"`,
+its name, kind, size, mode and bytes in base64. Reading an item or share peeks at
+`kind`. The server stores ciphertext and needs no change; the existing limits
+(256 KiB per item, 64 KiB per share) apply to the sealed payload. A file arrives
+through `write_secret_file`, which checks the declared size against the bytes,
+refuses a missing folder or an existing file without `--force`, and writes with
+`write_private` (0600 on Unix), ignoring the sender's mode and name. Sharing
+key material (`Kind::is_key_material`: SSH and private keys, keystores, service
+accounts) asks for confirmation, and without a terminal requires `--yes`.
+
 ## History
 
 `history.rs` keeps a numbered version list per (file, variable) in `history.db`

@@ -121,7 +121,7 @@ data is unrecoverable by design. Your local files are never affected.
 | File | Contents | Protection |
 |---|---|---|
 | `config.toml` | server URL, scanned folders (the whole computer by default), settings | none needed, no secrets |
-| `index.db` | paths and **variable names** of env files, never values | disposable cache |
+| `index.db` | paths, **variable names** of env files, and for secret files their kind, a short note and (JSON only) top-level key names; never values or contents | disposable cache |
 | `history.db` | old and current **values** of variables dotvault changed, plain text | owner-only (0600 on Unix); on by default, `history = false` turns it off |
 | `session.json` | server, username, session token, wrapped vault key, and (by default) the vault key | mode `0600` on Unix, written atomically; a warning is printed if it is loosened |
 
@@ -138,6 +138,22 @@ data is unrecoverable by design. Your local files are never affected.
   convention on Linux, `nspasteboard.org` on macOS, history, cloud sync and
   monitoring exclusions on Windows). Tools that ignore these hints may still keep
   a copy, which dotvault cannot remove.
+* Finding secret files (SSH keys, keystores, service-account JSON, credential
+  dotfiles) means reading the start of files with plausible names during a scan, to
+  tell a private key from a certificate or a service account from ordinary JSON.
+  That happens locally, reads at most 64 KiB per file, makes no network request, and
+  keeps only the kind, a short note (such as `ed25519, passphrase`) and JSON key
+  names. The index never holds the contents. A scan of the whole computer therefore
+  opens more files than before; folders such as `node_modules` and `testdata` are
+  skipped.
+* A secret file in your vault or in a share is end-to-end encrypted exactly like
+  variables: the server sees ciphertext and sizes only. A file is written back
+  byte for byte and readable only by you, never with the sender's permissions, and
+  the sender's file name is shown after sanitizing and never used as a path. Sharing
+  a private key, keystore or service-account file asks for confirmation (`--yes` in
+  a script), because anyone who opens the link can act as you; a share can be
+  revoked and limited in opens and time like any other. `dotvault show` and `vault
+  show` describe such files and never print them.
 * `history.db` is the one local file besides your env files that holds values. It
   exists so you can see and restore earlier values of a variable (`dotvault log`,
   `revert`). It is plain text, owner-only, and uses a rollback journal so no

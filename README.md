@@ -9,7 +9,7 @@ Find, read, edit, store and share your `.env` files from one place.
 ([Update](#update), [Uninstall](#uninstall), [From source](#from-source),
 [Completions](#completions)) · [Usage](#usage)
 ([Copying to the clipboard](#copying-to-the-clipboard),
-[History](#history-of-a-variable),
+[History](#history-of-a-variable), [Secret files](#secret-files),
 [Where dotvault looks](#where-dotvault-looks), [Commands](#commands)) ·
 [Configuration](#configuration) · [Self-hosting](#self-hosting) ·
 [Security](#security) · [Documentation](#documentation) · [License](#license)
@@ -44,6 +44,8 @@ features.
 - Edits in place with `set`, `unset` and `edit`. Comments and order are kept and
   writes are atomic.
 - Diffs two environments.
+- Finds SSH keys, private keys, keystores, service-account and other secret JSON,
+  and credential dotfiles, marks them, and stores or shares them like env files.
 - Keeps a git-like history of every variable it changes: `log` shows the versions,
   `revert` goes back to one, and values stay masked unless you ask.
 - Cloud vault with `push` and `pull`. Encryption happens on your machine; the
@@ -263,6 +265,66 @@ dotvault forget DATABASE_URL ...                  # delete its recorded history 
 - A file is known by its path. If you move it, its old history stays under the
   old path (`dotvault log -f OLD`), and the new location starts fresh.
 
+### Secret files
+
+Env files are not the only secrets lying around. dotvault also recognises these
+by their name **and** a quick look inside, and lists them on request:
+
+```bash
+dotvault ls --secrets                      # every secret file it found
+dotvault ls --kind ssh-key --kind keystore # only some kinds
+dotvault ls --secrets -k private_key       # JSON secrets that have a key of that name
+dotvault show ~/.ssh/id_ed25519            # kind, size, fingerprint (never the key)
+dotvault mark ./notes/passwords.txt        # treat a file as a secret by hand
+dotvault unmark ./fixtures/fake-key.json   # stop listing a file (or a wrong guess)
+dotvault push ~/.ssh/id_ed25519            # store it, encrypted, in your vault
+dotvault pull NAME --out ./id_ed25519      # get the exact bytes back, readable only by you
+dotvault share ~/.ssh/deploy_key           # asks first; --yes in scripts
+```
+
+Plain `dotvault ls` stays env files only and ends with a hint such as
+`24 secret files (--secrets to list)`.
+
+| Kind | What it is |
+| :--- | :--- |
+| `ssh-key` | An SSH private key (OpenSSH, PEM or PuTTY), with its algorithm and whether a passphrase protects it. Files with no extension in `.ssh`, `id_*` and `*_ed25519`-style names. |
+| `private-key` | Any other private key in a `.pem`, `.key` or `.p8` file. A certificate alone is not a secret and is left out. |
+| `keystore` | Java and Android keystores (`.jks`, `.keystore`, `.p12`, `.pfx`, `.bks`), checked by their file header, and `key.properties` files that hold a signing password. |
+| `service-account` | A Google service-account JSON, whatever the file is called, and `google-services.json`. |
+| `auth-json` | OAuth client or token files, `gcloud` logins, Docker `config.json` with logins, Composer `auth.json`. |
+| `secret-json` | Other JSON with a real-looking secret in it, such as `private_key`, `client_secret` or `refresh_token`. |
+| `aws-credentials`, `npm-token`, `netrc`, `pypi-token`, `git-credentials`, `kubeconfig` | Credential dotfiles, listed only when they hold an actual credential (`${NPM_TOKEN}` placeholders and empty values do not count). |
+| `marked` | A file you marked yourself. |
+
+- **What is read.** To tell a key from a certificate, or a service account from
+  ordinary JSON, dotvault reads the start of files with plausible names (a JSON
+  file in full, up to 64 KiB), on your machine, during a scan. It keeps only the
+  kind, a short note such as `ed25519, passphrase` and, for JSON, the top-level
+  key names. Never the contents. A scan of the whole computer takes a little longer
+  for it (tens of milliseconds for several thousand JSON files).
+- **Where it looks.** Everywhere a scan goes, plus `~/.ssh`, `~/.aws`, `~/.docker`,
+  `~/.kube` and `~/.config/gcloud` (on Windows `%APPDATA%\gcloud`) when they exist,
+  which a scan would otherwise skip as hidden folders. Dependency and fixture
+  folders (`node_modules`, `vendor`, `testdata`, `site-packages`) are skipped.
+- **Guessing wrong.** `dotvault unmark FILE` silences a file for good;
+  `dotvault mark FILE` adds one dotvault would not notice. Files in a `.ssh` folder
+  with an extension other than `.pem`, `.key` or `.ppk` are not guessed at; mark them.
+- **Cloud.** `push` stores the whole file, binary included, encrypted on your
+  machine like any vault item, as `project/file name`. `pull NAME --out PATH` writes
+  exactly those bytes with owner-only permissions (Unix; on Windows the file keeps
+  your profile folder's access rules) and will not replace a file without `--force`.
+  `vault show NAME` describes an item and never prints it. `--as-file` stores or
+  shares any small file as it is, even an env file. The limit is about 180 KiB for
+  the vault and about 47 KiB for a share.
+- **Sharing.** `share` and `open` work as for variables, with `--write PATH` on
+  the receiving side. Because a private key, a keystore or a service-account file
+  lets the holder act as you, `share` asks first in a terminal, and a script has to
+  pass `--yes`. The sender's file name is shown but never used as a path, and
+  `open --reveal` prints text files only.
+- **Not covered.** Secret files have no version history (history is per env
+  variable), and an older dotvault that finds a file in your vault says it cannot
+  read the item. A server upgrade is not needed.
+
 ### Where dotvault looks
 
 The first command that needs the list of env files searches the whole computer
@@ -283,6 +345,9 @@ remembered folders.
   `roots rm`) the list is yours and dotvault leaves it alone; removing the last
   folder starts over with the whole computer.
 - `dotvault scan --system` adds the whole computer to a list you named.
+- While dotvault chose the list, it also searches the credential folders that exist
+  (`~/.ssh`, `~/.aws`, `~/.docker`, `~/.kube`, `~/.config/gcloud`), which are hidden
+  folders a scan skips. They are for [secret files](#secret-files).
 - Upgrading from 0.3 or earlier: if your list is just your home folder, which is
   what those versions saved on their own, the next command widens it once and
   says so. Anything else you set up is kept.
@@ -298,7 +363,8 @@ remembered folders.
 - macOS may ask your terminal for permission to read Documents, Desktop,
   Downloads and removable volumes. Under WSL, Windows drives are under `/mnt/c`,
   which is not searched automatically, so name it: `dotvault scan /mnt/c/Users/you`.
-- Only file names and variable names are indexed, never values.
+- Only file names, variable names and the key names of JSON secrets are indexed,
+  never values or contents.
 - Finding the drives is new on Windows and macOS and has only been run through the
   automated tests so far. If a drive is missed, `dotvault scan <drive>` adds it,
   and a report helps.
@@ -348,7 +414,8 @@ dotvault shares revoke <id>
 | :--- | :--- |
 | `scan [PATHS] [--system] [--depth N]` | Search folders for env files and remember them. With no paths, rescans the remembered folders (the whole computer, every drive, on first use). `--system` adds the whole computer to folders you named. |
 | `roots add\|rm\|ls` | Manage the remembered folders. |
-| `ls [FOLDER]` | List env files. Filters: `-p/--project`, `-e/--env`, `--path`, `-k/--has-key`, `--examples`, `--only-examples`. Output: `--paths`, `--json`. `--refresh` rescans first. |
+| `ls [FOLDER]` | List env files. Filters: `-p/--project`, `-e/--env`, `--path`, `-k/--has-key`, `--examples`, `--only-examples`. Output: `--paths`, `--json`. `--refresh` rescans first. `--secrets` or `--kind KIND` list secret files instead. |
+| `mark FILE...` / `unmark FILE...` | Treat files as secrets by hand, or stop listing them (also silences a wrong guess). |
 | `show [TARGET]` | Show a file's variables. `--reveal`, `--keys A,B`, `--format table\|dotenv\|json\|shell\|powershell`. |
 | `find PATTERN` | Find a variable (name or glob) across all files. Same filters as `ls`, plus `--reveal`, `--json`. Rows with the same variant letter hold the same value. |
 | `get KEY...` | Print raw values: one name prints the bare value, several names or a glob like `'STRIPE_*'` print `KEY=value` lines. Pick the file with `-f FILE` or `-p PROJECT [-e ENV]`. `-k`/`--kv` gives `KEY=value` even for one name. `-c` copies to the clipboard instead, and `-ckv` copies the whole pair. |
@@ -361,11 +428,11 @@ dotvault shares revoke <id>
 | `diff A B` | Compare two files. `--reveal` shows values. |
 | `register`, `login [--no-cache-key]`, `logout`, `whoami` | Account and session. `--server URL` selects the server (default: the hosted one). `--no-cache-key` keeps the vault key off disk, so vault commands ask for your password. |
 | `passwd`, `recover` | Change your password, or reset it with the recovery key. |
-| `push [TARGET] [--name N] [--keys A,B]` | Store a file in your vault. The default name is `project/env`. Pushing again adds a version. |
+| `push [TARGET] [--name N] [--keys A,B] [--as-file]` | Store a file in your vault. The default name is `project/env`. Pushing again adds a version. SSH keys, keystores and secret JSON are stored whole, as files; `--as-file` does that for any small file. |
 | `pull NAME --out PATH` | Fetch a vault item. Refuses to overwrite unless you add `--merge` or `--force`. `--stdout` prints instead. |
 | `vault ls\|show\|rm` | List, show or delete vault items. Names can be abbreviated when unambiguous. |
-| `share [TARGET]` | Create a link and code. `--keys A,B` or `-i` choose the variables, `--vault NAME` shares a vault item, `--expires 30m\|24h\|7d` (1 minute to 30 days, default 24 h), `--max-views N`, `--note TEXT`. |
-| `open LINK\|CODE` | Open a share. Requires at least one of `--reveal`, `--write PATH` (with `--merge` or `--force`) or `--save [NAME]`, because opening uses up one of the allowed opens. |
+| `share [TARGET]` | Create a link and code. `--keys A,B` or `-i` choose the variables, `--vault NAME` shares a vault item, `--expires 30m\|24h\|7d` (1 minute to 30 days, default 24 h), `--max-views N`, `--note TEXT`, `--as-file`, `--yes` (skip the question asked before sharing a private key, keystore or service-account file). |
+| `open LINK\|CODE` | Open a share. Requires at least one of `--reveal`, `--write PATH` (with `--merge` or `--force`) or `--save [NAME]`, because opening uses up one of the allowed opens. A shared file is written exactly, readable only by you. |
 | `shares ls\|log\|revoke` | Manage the shares you created. A short unique prefix of the id is enough. |
 | `config` | Show where dotvault keeps its files. |
 | `completions SHELL` | Print a completion script. |
@@ -407,6 +474,8 @@ max_depth = 10
 auto_scan_secs = 600                   # rescan when the index is older than this
 ignore = ["playground"]                # extra folder names to skip
 example_suffixes = ["example", "sample", "template", "dist"]
+marked = ["/srv/app/passwords.txt"]   # files you marked as secrets (`dotvault mark`)
+unmarked = ["/srv/app/fake-key.json"]  # files you said are not secrets (`dotvault unmark`)
 history = true                         # keep a history of variables dotvault changes (plain text, owner-only)
 history_keep = 50                      # versions kept per variable
 ```

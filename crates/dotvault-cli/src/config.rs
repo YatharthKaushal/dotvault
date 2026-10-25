@@ -39,6 +39,9 @@ pub const DEFAULT_IGNORE_DIRS: &[&str] = &[
     "Pods",
     "DerivedData",
     ".Trash",
+    // fixtures and installed dependencies: full of keys that are not yours
+    "testdata",
+    "site-packages",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +64,10 @@ pub struct Config {
     pub ignore: Vec<String>,
     /// File-name segments that mark an env file as an example/template.
     pub example_suffixes: Vec<String>,
+    /// Files you told dotvault are secrets, whether or not it would have noticed.
+    pub marked: Vec<PathBuf>,
+    /// Files dotvault would take for secrets that you said are not.
+    pub unmarked: Vec<PathBuf>,
     /// Keep a history of every variable dotvault changes (`dotvault log`). It holds
     /// old and current values, so turn it off here if you do not want that.
     pub history: bool,
@@ -81,6 +88,8 @@ impl Default for Config {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+            marked: Vec::new(),
+            unmarked: Vec::new(),
             history: true,
             history_keep: 50,
         }
@@ -121,8 +130,13 @@ impl Config {
     /// index is rebuilt.
     pub fn scan_signature(&self) -> String {
         format!(
-            "{:?}|{}|{:?}|{:?}",
-            self.roots, self.max_depth, self.ignore, self.example_suffixes
+            "{:?}|{}|{:?}|{:?}|{:?}|{:?}",
+            self.roots,
+            self.max_depth,
+            self.ignore,
+            self.example_suffixes,
+            self.marked,
+            self.unmarked
         )
     }
 }
@@ -280,6 +294,35 @@ mod tests {
     fn without_a_known_home_an_older_file_is_left_alone() {
         let plan = plan_roots(&paths(&[HOME]), None, &paths(&["/"]), None);
         assert_eq!(plan, RootsPlan::Keep);
+    }
+
+    #[test]
+    fn marks_round_trip_through_the_config_file() {
+        let mut config = Config::default();
+        assert!(config.marked.is_empty() && config.unmarked.is_empty());
+        config.marked.push(PathBuf::from("/srv/app/secrets.txt"));
+        config
+            .unmarked
+            .push(PathBuf::from("/srv/app/not-a-secret.json"));
+        config.history = false;
+        let text = toml::to_string_pretty(&config).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.marked, config.marked, "{text}");
+        assert_eq!(back.unmarked, config.unmarked, "{text}");
+        assert!(
+            !back.history,
+            "settings after the lists survive too: {text}"
+        );
+        assert_ne!(
+            config.scan_signature(),
+            Config::default().scan_signature(),
+            "marking changes what a scan finds, so the index must be rebuilt"
+        );
+        let old: Config = toml::from_str("roots = [\"/x\"]\n").unwrap();
+        assert!(
+            old.marked.is_empty(),
+            "files from before marking still load"
+        );
     }
 
     #[test]

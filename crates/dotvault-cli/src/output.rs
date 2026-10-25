@@ -37,7 +37,7 @@ pub fn sanitize(text: &str) -> Cow<'_, str> {
 
 /// Like [`sanitize`] but keeps real line breaks and tabs, for multi-line values
 /// shown in a machine format (a PEM key should still look like one).
-fn sanitize_keeping_layout(text: &str) -> Cow<'_, str> {
+pub fn sanitize_keeping_layout(text: &str) -> Cow<'_, str> {
     escape_unsafe(text, true)
 }
 

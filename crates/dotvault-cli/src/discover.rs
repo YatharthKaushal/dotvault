@@ -64,7 +64,15 @@ pub fn default_roots() -> Vec<PathBuf> {
     let from_env = roots_from_override(std::env::var_os("DOTVAULT_SCAN_ROOTS"));
     let roots = match from_env {
         Some(list) => list,
-        None => add_home_if_outside(disks(Os::current()), home_dir()),
+        None => {
+            let home = home_dir();
+            let mut roots = add_home_if_outside(disks(Os::current()), home.clone());
+            if let Some(home) = &home {
+                let appdata = std::env::var_os("APPDATA");
+                roots.extend(secret_dirs(home, Os::current(), appdata.as_deref()));
+            }
+            roots
+        }
     };
     let mut out: Vec<PathBuf> = Vec::new();
     for root in roots {
@@ -75,6 +83,24 @@ pub fn default_roots() -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// Hidden folders in a home folder that hold credentials. The walk of `/` skips
+/// hidden folders in homes, so each one that exists gets a root of its own.
+fn secret_dirs(home: &Path, os: Os, appdata: Option<&OsStr>) -> Vec<PathBuf> {
+    let mut dirs = vec![
+        home.join(".ssh"),
+        home.join(".aws"),
+        home.join(".docker"),
+        home.join(".kube"),
+    ];
+    match (os, appdata) {
+        (Os::Windows, Some(appdata)) => dirs.push(PathBuf::from(appdata).join("gcloud")),
+        (Os::Windows, None) => {}
+        _ => dirs.push(home.join(".config").join("gcloud")),
+    }
+    dirs.retain(|d| d.is_dir());
+    dirs
 }
 
 /// Said in the first-run notice, so it matches what `default_roots` will do.
@@ -849,6 +875,33 @@ tmpfs /run/media tmpfs rw 0 0
         for network in ["smbfs", "nfs", "afpfs", "webdav", "autofs", "devfs", ""] {
             assert!(!is_local_mac_fs(network), "{network}");
         }
+    }
+
+    #[test]
+    fn credential_folders_that_exist_get_a_root_of_their_own() {
+        let (_t, home) = fake_root();
+        for rel in [".ssh", ".config/gcloud", ".docker", "code"] {
+            fs::create_dir_all(home.join(rel)).unwrap();
+        }
+        assert_eq!(
+            secret_dirs(&home, Os::Linux, None),
+            [
+                home.join(".ssh"),
+                home.join(".docker"),
+                home.join(".config").join("gcloud")
+            ],
+            "only folders that exist, never code folders, none of .aws/.kube"
+        );
+        // gcloud keeps its files in %APPDATA% on Windows, not under .config
+        let appdata = home.join("AppData").join("Roaming");
+        fs::create_dir_all(appdata.join("gcloud")).unwrap();
+        let win = secret_dirs(&home, Os::Windows, Some(appdata.as_os_str()));
+        assert!(win.contains(&appdata.join("gcloud")), "{win:?}");
+        assert!(
+            !win.contains(&home.join(".config").join("gcloud")),
+            "{win:?}"
+        );
+        assert_eq!(secret_dirs(&home, Os::Windows, None).len(), 2);
     }
 
     #[test]

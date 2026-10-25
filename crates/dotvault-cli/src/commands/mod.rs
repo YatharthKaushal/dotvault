@@ -3,6 +3,7 @@ mod cloud;
 mod edit;
 mod history;
 mod ls;
+mod secrets;
 mod share;
 mod vault;
 mod view;
@@ -17,6 +18,8 @@ use owo_colors::OwoColorize;
 use crate::cli::{Cli, Command, TargetFlags};
 use crate::clipboard;
 use crate::config::{Config, Dirs, RootsPlan};
+use dotvault_core::secrets::Kind;
+
 use crate::discover;
 use crate::index::{FileRecord, Index};
 use crate::output::{humanize_secs, now_secs, tilde};
@@ -44,6 +47,8 @@ pub fn run(cli: Cli) -> Result<ExitCode> {
         Command::Set(a) => edit::set(&ctx, a),
         Command::Unset(a) => edit::unset(&ctx, a),
         Command::Edit(a) => edit::edit(&ctx, a),
+        Command::Mark(a) => secrets::mark(&mut ctx, a, true),
+        Command::Unmark(a) => secrets::mark(&mut ctx, a, false),
         Command::Log(a) => history::log(&ctx, a),
         Command::Revert(a) => history::revert(&ctx, a),
         Command::Forget(a) => history::forget(&ctx, a),
@@ -168,8 +173,17 @@ impl Ctx {
 
     /// Indexed env files, rescanning first when the index is old, was built
     /// for different settings, or `force` is set. Entries are checked against
-    /// the disk, so deleted files disappear and edited ones are re-read.
+    /// the disk, so deleted files disappear and edited ones are re-read. Secret
+    /// files are not included: everything that picks an env file (projects,
+    /// `find`, `diff`) works on these only.
     fn records(&self, force: bool) -> Result<Vec<FileRecord>> {
+        let mut records = self.all_records(force)?;
+        records.retain(|r| r.kind == Kind::Env);
+        Ok(records)
+    }
+
+    /// Everything indexed: env files and secret files.
+    fn all_records(&self, force: bool) -> Result<Vec<FileRecord>> {
         let mut index = self.open_index()?;
         if !self.config.roots.is_empty() {
             let gap = rescan_gap_secs(self.config.auto_scan_secs, index.last_scan_millis()?);

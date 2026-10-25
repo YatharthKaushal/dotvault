@@ -8,6 +8,8 @@ use anyhow::{bail, Context, Result};
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
+use dotvault_core::secrets::Kind;
+
 use super::Ctx;
 use crate::cli::{LsArgs, RootsCommand, ScanArgs};
 use crate::discover;
@@ -68,6 +70,22 @@ pub fn scan(ctx: &mut Ctx, args: ScanArgs) -> Result<ExitCode> {
             String::new()
         },
     )?;
+    let secrets = outcome
+        .records
+        .iter()
+        .filter(|r| r.kind.is_secret())
+        .count();
+    if secrets > 0 {
+        writeln!(
+            out,
+            "{}",
+            format!(
+                "{} found (dotvault ls --secrets)",
+                plural(secrets, "secret file")
+            )
+            .dimmed()
+        )?;
+    }
     if outcome.errors > 0 {
         writeln!(
             out,
@@ -176,7 +194,14 @@ pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let records = ctx.records(args.refresh)?;
+    let records = ctx.all_records(args.refresh)?;
+    // Env files by default; `--secrets` and `--kind` switch to the other files.
+    let wants_secrets = args.secrets || !args.kind.is_empty();
+    let of_wanted_kind = |r: &FileRecord| match (wants_secrets, args.kind.is_empty()) {
+        (false, _) => r.kind == Kind::Env,
+        (true, true) => r.kind.is_secret(),
+        (true, false) => args.kind.contains(&r.kind),
+    };
     let under = match &args.folder {
         Some(p) => Some(
             crate::fsutil::canonical(p)
@@ -193,10 +218,13 @@ pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {
     };
 
     let filter = build(&args.filter)?;
-    let shown: Vec<&FileRecord> = records.iter().filter(|r| filter.matches(r)).collect();
+    let shown: Vec<&FileRecord> = records
+        .iter()
+        .filter(|r| of_wanted_kind(r) && filter.matches(r))
+        .collect();
 
     // How many example files the default view is hiding.
-    let hidden_examples = if args.filter.examples || args.filter.only_examples {
+    let hidden_examples = if wants_secrets || args.filter.examples || args.filter.only_examples {
         0
     } else {
         let only = FilterArgs {
@@ -204,7 +232,19 @@ pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {
             ..args.filter.clone()
         };
         let f = build(&only)?;
-        records.iter().filter(|r| f.matches(r)).count()
+        records
+            .iter()
+            .filter(|r| r.kind == Kind::Env && f.matches(r))
+            .count()
+    };
+    // How many secret files the default view is leaving out.
+    let hidden_secrets = if wants_secrets {
+        0
+    } else {
+        records
+            .iter()
+            .filter(|r| r.kind.is_secret() && filter.matches(r))
+            .count()
     };
 
     if args.json {
@@ -220,10 +260,26 @@ pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {
     }
 
     if shown.is_empty() {
-        anstream::eprintln!("No env files match.");
+        anstream::eprintln!(
+            "No {} match.",
+            if wants_secrets {
+                "secret files"
+            } else {
+                "env files"
+            }
+        );
         if records.is_empty() {
             anstream::eprintln!(
                 "Nothing is indexed yet; check `dotvault roots ls` and run `dotvault scan`."
+            );
+        } else if wants_secrets {
+            anstream::eprintln!(
+                "Files are recognised by name and content; `dotvault mark PATH` adds one by hand."
+            );
+        } else if hidden_secrets > 0 {
+            anstream::eprintln!(
+                "({} found; add --secrets to list them)",
+                plural(hidden_secrets, "secret file")
             );
         } else if hidden_examples > 0 {
             anstream::eprintln!(
@@ -235,7 +291,13 @@ pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {
     }
 
     let now = now_secs();
-    let mut table = Table::new(&["PROJECT", "ENV", "KEYS", "MODIFIED", "PATH"]);
+    let mut table = Table::new(&[
+        "PROJECT",
+        if wants_secrets { "KIND" } else { "ENV" },
+        "KEYS",
+        "MODIFIED",
+        "PATH",
+    ]);
     let mut previous_root: Option<&PathBuf> = None;
     for r in &shown {
         let repeat = previous_root == Some(&r.project_root);
@@ -245,16 +307,24 @@ pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {
             Cell::new(
                 if r.is_example {
                     format!("{} (example)", r.label)
-                } else {
+                } else if r.detail.is_empty() {
                     r.label.clone()
+                } else {
+                    format!("{} ({})", r.label, r.detail)
                 },
                 if r.is_example {
                     Style::Dim
+                } else if r.kind.is_secret() {
+                    Style::Yellow
                 } else {
                     Style::Cyan
                 },
             ),
-            r.keys.len().to_string().into(),
+            if r.kind.is_secret() && r.keys.is_empty() {
+                "-".to_string().into()
+            } else {
+                r.keys.len().to_string().into()
+            },
             Cell::new(age(now, r.mtime / 1000), Style::Dim),
             Cell::new(tilde(&r.path), Style::Dim),
         ]);
@@ -268,9 +338,18 @@ pub fn ls(ctx: &Ctx, args: LsArgs) -> Result<ExitCode> {
         .len();
     let mut summary = format!(
         "{} in {}",
-        plural(shown.len(), "file"),
+        plural(
+            shown.len(),
+            if wants_secrets { "secret file" } else { "file" }
+        ),
         plural(projects, "project")
     );
+    if hidden_secrets > 0 {
+        summary.push_str(&format!(
+            " · {} (--secrets to list)",
+            plural(hidden_secrets, "secret file")
+        ));
+    }
     if hidden_examples > 0 {
         summary.push_str(&format!(
             " · {} hidden (--examples to include)",
@@ -319,6 +398,7 @@ pub fn config(ctx: &Ctx) -> Result<ExitCode> {
 }
 
 fn counts(records: &[FileRecord]) -> (usize, usize, usize) {
+    let records: Vec<&FileRecord> = records.iter().filter(|r| r.kind == Kind::Env).collect();
     let examples = records.iter().filter(|r| r.is_example).count();
     let projects = records
         .iter()
@@ -339,6 +419,9 @@ struct JsonFile<'a> {
     modified: i64,
     key_count: usize,
     key_names: &'a [String],
+    kind: &'static str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    detail: &'a str,
 }
 
 impl<'a> From<&'a FileRecord> for JsonFile<'a> {
@@ -352,6 +435,8 @@ impl<'a> From<&'a FileRecord> for JsonFile<'a> {
             modified: r.mtime / 1000,
             key_count: r.keys.len(),
             key_names: &r.keys,
+            kind: r.kind.as_str(),
+            detail: &r.detail,
         }
     }
 }

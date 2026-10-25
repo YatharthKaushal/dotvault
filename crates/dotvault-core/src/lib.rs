@@ -9,6 +9,7 @@ pub mod dotenv;
 pub mod error;
 pub mod fingerprint;
 pub mod payload;
+pub mod secrets;
 pub mod share_code;
 
 pub use error::{Error, Result};

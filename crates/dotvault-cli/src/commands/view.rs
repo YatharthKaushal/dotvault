@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use dotvault_core::dotenv::DotEnv;
 use globset::GlobBuilder;
 use owo_colors::OwoColorize;
@@ -34,6 +34,17 @@ pub fn show(ctx: &Ctx, args: ShowArgs) -> Result<ExitCode> {
             may_create: false,
         },
     )?;
+    // An SSH key, keystore or secret JSON is described, never parsed as variables.
+    if let Some(detected) = super::secrets::secret_at(ctx, &path) {
+        if args.format != Format::Table || !args.keys.is_empty() {
+            bail!(
+                "{} is a {} file; it can only be shown as a table of its details",
+                tilde(&path),
+                detected.kind.as_str()
+            );
+        }
+        return super::secrets::show_secret(&path, &detected, args.reveal);
+    }
     let env = DotEnv::parse(&read_text(&path, false)?);
     let mut pairs = pairs_of(&env);
     let mut exit = ExitCode::SUCCESS;

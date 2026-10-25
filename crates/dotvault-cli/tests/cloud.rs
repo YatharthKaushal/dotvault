@@ -9,7 +9,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use dotvault_core::api::{CreateShareRequest, CreateShareResponse};
 use dotvault_core::crypto::{random_key, seal_json, AAD_SHARE};
-use dotvault_core::payload::{EnvEntry, EnvPayload};
+use dotvault_core::payload::{EnvEntry, EnvPayload, FilePayload};
 use dotvault_core::share_code;
 use dotvault_server::config::RateLimit;
 use dotvault_server::harness::{self, RunningServer};
@@ -154,6 +154,16 @@ impl User {
 
     fn read(&self, rel: &str) -> String {
         fs::read_to_string(self.work.join(rel)).unwrap()
+    }
+
+    fn write_bytes(&self, rel: &str, contents: &[u8]) {
+        let p = self.work.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, contents).unwrap();
+    }
+
+    fn read_bytes(&self, rel: &str) -> Vec<u8> {
+        fs::read(self.work.join(rel)).unwrap()
     }
 
     fn session_json(&self) -> serde_json::Value {
@@ -1134,7 +1144,7 @@ fn sharing_from_the_vault_and_from_project_selectors() {
 
 /// Uploads a payload no honest client would produce, using `user`'s real session,
 /// and returns the share code.
-fn upload_raw_share(world: &World, user: &User, payload: &EnvPayload) -> String {
+fn upload_raw_share<T: serde::Serialize>(world: &World, user: &User, payload: &T) -> String {
     let token = user.session_json()["token"].as_str().unwrap().to_string();
     let key = random_key().unwrap();
     let body = serde_json::to_vec(&CreateShareRequest {
@@ -1267,4 +1277,492 @@ fn a_hostile_share_cannot_attack_the_recipient() {
         .clone();
     assert!(!listing.contains(&0x1b) && !listing.contains(&0x07));
     assert!(String::from_utf8_lossy(&listing).contains("shared/eve/evil"));
+}
+
+// --- secret files: vault storage and sharing ------------------------------------------
+
+// Built from fragments so nothing here looks like real key material.
+fn pem(label: &str, body: &str) -> String {
+    format!(
+        "{}BEGIN {label}{}\n{body}\n-----END {label}-----\n",
+        "-----", "-----"
+    )
+}
+
+/// A keystore-looking binary: JKS magic, then every byte value, so any lossy
+/// handling of binary data would show.
+fn keystore_bytes() -> Vec<u8> {
+    let mut b = vec![0xFE, 0xED, 0xFE, 0xED, 0, 0, 0, 2];
+    b.extend(0..=255u8);
+    b.extend([0, 0, 255, 254, 0]);
+    b
+}
+
+fn service_account_json() -> String {
+    serde_json::json!({
+        "type": "service_account",
+        "project_id": "demo",
+        "private_key": pem("PRIVATE KEY", "c2VjcmV0LWJvZHk="),
+        "client_email": "bot@demo.example",
+    })
+    .to_string()
+}
+
+fn project_with_secret_files(user: &User) {
+    user.write("proj/package.json", "{}");
+    user.write(
+        "proj/id_ed25519",
+        &pem("OPENSSH PRIVATE KEY", "QUJDREVGR0hJSktM"),
+    );
+    user.write_bytes("proj/release.jks", &keystore_bytes());
+    user.write("proj/service.json", &service_account_json());
+    user.write("proj/notes.txt", "remember the milk\n");
+}
+
+#[cfg(unix)]
+fn mode_of(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+#[test]
+fn secret_files_are_stored_in_the_vault_and_come_back_byte_for_byte() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    ada.register();
+    project_with_secret_files(&ada);
+
+    ada.dv()
+        .args(["push", "proj/id_ed25519"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Pushed"))
+        .stdout(predicate::str::contains("proj/id_ed25519"))
+        .stdout(predicate::str::contains("ssh-key"));
+    ada.dv()
+        .args(["push", "proj/release.jks"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("keystore"));
+    ada.dv()
+        .args(["push", "proj/service.json", "--name", "sa/demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(v1, service-account"));
+    ada.dv()
+        .args(["vault", "ls"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("proj/id_ed25519"))
+        .stdout(predicate::str::contains("proj/release.jks"))
+        .stdout(predicate::str::contains("sa/demo"));
+
+    // describing an item never prints the file
+    let shown = ada.stdout_of(&["vault", "show", "proj/id_ed25519"]);
+    assert!(
+        shown.contains("ssh-key") && shown.contains("fingerprint"),
+        "{shown}"
+    );
+    assert!(shown.contains("never printed"), "{shown}");
+    assert!(
+        !shown.contains("BEGIN") && !shown.contains("QUJDREVG"),
+        "{shown}"
+    );
+    ada.dv()
+        .args(["vault", "show", "proj/id_ed25519", "--reveal"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("BEGIN").not());
+
+    // byte for byte, readable only by the owner, even from another device
+    ada.dv()
+        .args(["pull", "proj/release.jks", "--out", "out/release.jks"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not exist; create it first"));
+    fs::create_dir_all(ada.work.join("out")).unwrap();
+    ada.dv()
+        .args(["pull", "proj/release.jks", "--out", "out/release.jks"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("readable only by you"));
+    assert_eq!(ada.read_bytes("out/release.jks"), keystore_bytes());
+    #[cfg(unix)]
+    assert_eq!(mode_of(&ada.work.join("out/release.jks")), 0o600);
+
+    let phone = ada.other_device(&w);
+    phone.login();
+    phone
+        .dv()
+        .args(["pull", "sa/demo", "--out", "sa.json"])
+        .assert()
+        .success();
+    assert_eq!(phone.read("sa.json"), service_account_json());
+}
+
+#[test]
+fn pulling_a_file_never_overwrites_by_accident_and_refuses_what_makes_no_sense() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    ada.register();
+    project_with_secret_files(&ada);
+    ada.dv()
+        .args(["push", "proj/release.jks"])
+        .assert()
+        .success();
+
+    ada.dv()
+        .args(["pull", "proj/release.jks", "--out", "k.jks"])
+        .assert()
+        .success();
+    ada.dv()
+        .args(["pull", "proj/release.jks", "--out", "k.jks"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists"));
+    ada.write_bytes("k.jks", b"older content");
+    #[cfg(unix)]
+    {
+        // an older, more permissive file is replaced by an owner-only one
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(ada.work.join("k.jks"), fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    ada.dv()
+        .args(["pull", "proj/release.jks", "--out", "k.jks", "--force"])
+        .assert()
+        .success();
+    assert_eq!(ada.read_bytes("k.jks"), keystore_bytes());
+    #[cfg(unix)]
+    assert_eq!(mode_of(&ada.work.join("k.jks")), 0o600);
+
+    for (args, message) in [
+        (vec!["--stdout"], "write it with --out PATH"),
+        (vec!["--out", "m.jks", "--merge"], "cannot be merged"),
+        (
+            vec!["--out", "n.jks", "--keys", "A"],
+            "--keys does not apply",
+        ),
+    ] {
+        ada.dv()
+            .args(["pull", "proj/release.jks"])
+            .args(&args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("is a file"))
+            .stderr(predicate::str::contains(message));
+    }
+    assert!(!ada.work.join("m.jks").exists() && !ada.work.join("n.jks").exists());
+    ada.dv()
+        .args(["vault", "show", "proj/release.jks", "--keys", "A"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is a file"));
+}
+
+#[test]
+fn as_file_stores_any_small_file_and_a_huge_one_says_how_big_is_allowed() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    ada.register();
+    project_with_secret_files(&ada);
+    ada.write(".env", ENV);
+
+    ada.dv()
+        .args(["push", "proj/notes.txt", "--as-file"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("file, "));
+    // an env-named file stored as a file is kept exactly, comments and all
+    ada.dv()
+        .args(["push", ".env", "--as-file", "--name", "raw-env"])
+        .assert()
+        .success();
+    ada.dv()
+        .args(["pull", "raw-env", "--out", "raw.env"])
+        .assert()
+        .success();
+    assert_eq!(ada.read("raw.env"), ENV);
+    // without the flag an env file is still read as variables
+    ada.dv()
+        .args(["push", ".env", "--name", "as-vars"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3 variables"));
+
+    ada.write_bytes("big.bin", &vec![7u8; 300 * 1024]);
+    ada.dv()
+        .args(["push", "big.bin", "--as-file"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("KiB"))
+        .stderr(predicate::str::contains("vault holds files up to"));
+    ada.write_bytes("fits.bin", &vec![7u8; 150 * 1024]);
+    ada.dv()
+        .args(["push", "fits.bin", "--as-file"])
+        .assert()
+        .success();
+
+    ada.dv()
+        .args(["push", "proj/notes.txt", "--as-file", "--keys", "A"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn key_material_needs_a_yes_to_share_and_everything_else_does_not() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    let bob = w.user("bob", "bob-long-password-1");
+    ada.register();
+    bob.register();
+    project_with_secret_files(&ada);
+
+    // no terminal here, so a private key, a keystore and a service account all refuse
+    for file in ["proj/id_ed25519", "proj/release.jks", "proj/service.json"] {
+        ada.dv()
+            .args(["share", file])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("--yes"))
+            .stderr(predicate::str::contains("use it as you"));
+    }
+    ada.dv()
+        .args(["shares", "ls"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("not created any shares"));
+
+    // a plain file and an env file need no confirmation
+    ada.dv()
+        .args(["share", "proj/notes.txt", "--as-file"])
+        .assert()
+        .success();
+    ada.write(".env", ENV);
+    ada.dv().args(["share", ".env"]).assert().success();
+
+    // --yes shares the key; the recipient gets it exactly, privately
+    let link = ada
+        .stdout_of(&["share", "proj/id_ed25519", "--yes", "--note", "deploy key"])
+        .trim()
+        .to_string();
+    let out = bob
+        .dv()
+        .args(["open", &link, "--write", "deploy.key"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("proj/id_ed25519") && stderr.contains("deploy key"),
+        "{stderr}"
+    );
+    assert_eq!(
+        bob.read("deploy.key"),
+        pem("OPENSSH PRIVATE KEY", "QUJDREVGR0hJSktM")
+    );
+    #[cfg(unix)]
+    assert_eq!(mode_of(&bob.work.join("deploy.key")), 0o600);
+
+    // opening again never overwrites unless told to
+    bob.dv()
+        .args(["open", &link, "--write", "deploy.key"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists"));
+    bob.dv()
+        .args(["open", &link, "--write", "deploy.key", "--force"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn a_shared_binary_file_arrives_intact_and_text_can_be_read_on_screen() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    let bob = w.user("bob", "bob-long-password-1");
+    ada.register();
+    bob.register();
+    project_with_secret_files(&ada);
+
+    let keystore = ada
+        .stdout_of(&["share", "proj/release.jks", "--yes"])
+        .trim()
+        .to_string();
+    bob.dv()
+        .args(["open", &keystore, "--write", "k.jks"])
+        .assert()
+        .success();
+    assert_eq!(bob.read_bytes("k.jks"), keystore_bytes());
+    // binary content is never dumped on a terminal
+    bob.dv()
+        .args(["open", &keystore, "--reveal"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("not a text file"));
+
+    let notes = ada
+        .stdout_of(&["share", "proj/notes.txt", "--as-file"])
+        .trim()
+        .to_string();
+    bob.dv()
+        .args(["open", &notes, "--reveal"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("remember the milk"));
+}
+
+#[test]
+fn a_shared_file_can_be_saved_to_the_recipients_own_vault() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    let bob = w.user("bob", "bob-long-password-1");
+    ada.register();
+    bob.register();
+    project_with_secret_files(&ada);
+
+    let link = ada
+        .stdout_of(&["share", "proj/release.jks", "--yes"])
+        .trim()
+        .to_string();
+    bob.dv()
+        .args(["open", &link, "--save"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Saved to your vault as shared/ada/proj/release.jks",
+        ));
+    bob.dv()
+        .args(["pull", "shared/ada/proj/release.jks", "--out", "mine.jks"])
+        .assert()
+        .success();
+    assert_eq!(bob.read_bytes("mine.jks"), keystore_bytes());
+    // and the owner sees the save in the log
+    ada.dv()
+        .args(["shares", "log", &parse_id(&link)])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("save"));
+}
+
+fn parse_id(link: &str) -> String {
+    share_code::parse(link).unwrap().id
+}
+
+#[test]
+fn sharing_a_file_validates_its_options_and_its_size() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    ada.register();
+    project_with_secret_files(&ada);
+
+    ada.dv()
+        .args(["share", "proj/notes.txt", "--as-file", "--keys", "A"])
+        .assert()
+        .failure();
+    ada.dv()
+        .args(["share", "proj/release.jks", "--yes", "--keys", "A"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("shared whole"));
+    ada.write_bytes("big.bin", &vec![9u8; 70 * 1024]);
+    ada.dv()
+        .args(["share", "big.bin", "--as-file"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("too large to share"))
+        .stderr(predicate::str::contains("dotvault push"));
+    ada.write_bytes("fits.bin", &vec![9u8; 40 * 1024]);
+    ada.dv()
+        .args(["share", "fits.bin", "--as-file"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn a_vault_file_can_be_shared_without_the_local_copy() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    let bob = w.user("bob", "bob-long-password-1");
+    ada.register();
+    bob.register();
+    project_with_secret_files(&ada);
+    ada.dv()
+        .args(["push", "proj/service.json"])
+        .assert()
+        .success();
+    fs::remove_file(ada.work.join("proj/service.json")).unwrap();
+
+    let link = ada
+        .stdout_of(&["share", "--vault", "proj/service.json", "--yes"])
+        .trim()
+        .to_string();
+    bob.dv()
+        .args(["open", &link, "--write", "sa.json"])
+        .assert()
+        .success();
+    assert_eq!(bob.read("sa.json"), service_account_json());
+    // the guard applies to a vault item too
+    ada.dv()
+        .args(["share", "--vault", "proj/service.json"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--yes"));
+}
+
+#[test]
+fn a_hostile_file_share_cannot_choose_where_it_is_written_or_drive_the_terminal() {
+    let w = World::new();
+    let eve = w.user("eve", "eve-long-password-1");
+    let bob = w.user("bob", "bob-long-password-1");
+    eve.register();
+    bob.register();
+
+    let mut file = FilePayload::new(
+        "../../outside\u{1b}]0;pwned\u{7}.pem",
+        "ssh-key\u{1b}[2J",
+        Some(0o777),
+        b"harmless bytes".to_vec(),
+        "evil\u{1b}[31m",
+    );
+    file.note = Some("\u{1b}[2Jclear".into());
+    let code = upload_raw_share(&w, &eve, &file);
+
+    fs::create_dir_all(bob.work.join("dest")).unwrap();
+    let out = bob
+        .dv()
+        .args(["open", &code, "--write", "dest/chosen.bin"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    for stream in [&out.stdout, &out.stderr] {
+        assert!(
+            !String::from_utf8_lossy(stream).contains('\u{1b}'),
+            "a raw escape reached the terminal"
+        );
+    }
+    assert_eq!(bob.read_bytes("dest/chosen.bin"), b"harmless bytes");
+    // the sender's name decided nothing about the destination, or the permissions
+    assert!(!bob.work.parent().unwrap().join("outside.pem").exists());
+    #[cfg(unix)]
+    assert_eq!(mode_of(&bob.work.join("dest/chosen.bin")), 0o600);
+}
+
+#[test]
+fn a_file_whose_size_does_not_match_is_refused_and_nothing_is_written() {
+    let w = World::new();
+    let eve = w.user("eve", "eve-long-password-1");
+    let bob = w.user("bob", "bob-long-password-1");
+    eve.register();
+    bob.register();
+    let mut file = FilePayload::new("k.pem", "private-key", None, b"12345".to_vec(), "s");
+    file.size = 99;
+    let code = upload_raw_share(&w, &eve, &file);
+    bob.dv()
+        .args(["open", &code, "--write", "k.pem"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("damaged"));
+    assert!(!bob.work.join("k.pem").exists());
 }

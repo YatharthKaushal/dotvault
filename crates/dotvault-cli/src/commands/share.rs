@@ -10,20 +10,24 @@ use dotvault_core::api::{
 };
 use dotvault_core::crypto::{self, random_key, AAD_SHARE};
 use dotvault_core::dotenv::DotEnv;
-use dotvault_core::payload::EnvPayload;
+use dotvault_core::payload::{EnvPayload, FilePayload, Payload};
+use dotvault_core::secrets::Kind;
 use dotvault_core::share_code;
 use owo_colors::OwoColorize;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 
-use super::cloud::{check_write_target, find_item, friendly, write_env_file};
-use super::vault::default_item_name;
+use super::cloud::{
+    check_write_target, describe_file, file_payload, find_item, friendly, write_env_file,
+    write_secret_file,
+};
+use super::vault::{default_file_item_name, default_item_name};
 use super::view::print_pairs;
 use super::{read_text, resolve_target, Ctx, ResolveOpts};
 use crate::cli::{OpenArgs, ShareArgs, SharesCommand};
 use crate::client::{normalize_server, ApiError};
 use crate::output::{
-    age, format_utc, humanize_secs, now_secs, parse_duration, plural, print_json, sanitize, stdout,
-    until, Cell, Style, Table,
+    age, format_utc, humanize_secs, now_secs, parse_duration, plural, print_json, sanitize,
+    sanitize_keeping_layout, stdout, until, Cell, Style, Table,
 };
 use crate::prompt;
 
@@ -44,8 +48,8 @@ pub fn share(ctx: &Ctx, args: ShareArgs) -> Result<ExitCode> {
 
     let cloud = ctx.cloud()?;
 
-    // Where the variables come from: a vault item or a local file.
-    let (source, full) = match &args.vault {
+    // Where it comes from: a vault item or a local file.
+    let (source, full): (String, Payload) = match &args.vault {
         Some(name) => {
             let vault_key = cloud.vault_key()?;
             let (items, _) = cloud.items(&vault_key)?;
@@ -62,16 +66,113 @@ pub fn share(ctx: &Ctx, args: ShareArgs) -> Result<ExitCode> {
                     may_create: false,
                 },
             )?;
-            let env = DotEnv::parse(&read_text(&path, false)?);
-            let source = default_item_name(ctx, &path);
-            (
-                source.clone(),
-                EnvPayload::from_dotenv(&env, source, None).0,
-            )
+            // An SSH key, keystore or secret JSON is shared whole, as a file.
+            let detected = super::secrets::secret_at(ctx, &path);
+            if args.as_file || detected.is_some() {
+                let kind = detected.map_or("file", |d| d.kind.as_str());
+                let source = default_file_item_name(ctx, &path);
+                let file = file_payload(&path, kind, &source)?;
+                (source, Payload::File(file))
+            } else {
+                let env = DotEnv::parse(&read_text(&path, false)?);
+                let source = default_item_name(ctx, &path);
+                (
+                    source.clone(),
+                    Payload::Env(EnvPayload::from_dotenv(&env, source, None).0),
+                )
+            }
         }
     };
 
-    // Which variables to share.
+    let note = args.note.clone().filter(|n| !n.trim().is_empty());
+    let payload = match full {
+        Payload::Env(full) => Payload::Env(share_variables(&args, full, &source, note)?),
+        Payload::File(mut file) => {
+            if !args.keys.is_empty() || args.interactive {
+                bail!(
+                    "{} is a file, shared whole; --keys and -i pick variables and do not apply",
+                    sanitize(&source)
+                );
+            }
+            confirm_key_material(&file, args.yes)?;
+            file.source = source;
+            file.note = note;
+            Payload::File(file)
+        }
+    };
+
+    // The key never reaches the server; it lives only in the link.
+    let share_key = random_key()?;
+    let sealed = crypto::seal_json(&share_key, &payload, AAD_SHARE)?;
+    if sealed.len() > MAX_SHARE_PAYLOAD_BYTES {
+        let advice = match &payload {
+            Payload::Env(_) => "pick fewer variables".to_string(),
+            Payload::File(_) => format!(
+                "a share holds files up to about {} KiB; store a larger one with `dotvault push` instead",
+                MAX_SHARE_PAYLOAD_BYTES * 3 / 4 / 1024
+            ),
+        };
+        bail!(
+            "that is too large to share ({} KiB, the limit is {} KiB); {advice}",
+            sealed.len() / 1024,
+            MAX_SHARE_PAYLOAD_BYTES / 1024
+        );
+    }
+    let created: CreateShareResponse = cloud
+        .api
+        .post(
+            "/shares",
+            &CreateShareRequest {
+                payload_ct: sealed,
+                ttl_secs: Some(ttl),
+                max_views: args.max_views,
+            },
+        )
+        .map_err(friendly)?;
+
+    let link = share_code::encode_link(cloud.api.base(), &created.id, &share_key);
+    let code = share_code::encode_code(&created.id, &share_key);
+
+    // Summary on stderr, the link alone on stdout so it can be piped or copied.
+    match &payload {
+        Payload::Env(env) => {
+            let names: Vec<&str> = env.entries.iter().map(|e| e.key.as_str()).collect();
+            anstream::eprintln!(
+                "Shared {}: {}",
+                plural(names.len(), "variable"),
+                names.join(", ")
+            );
+        }
+        Payload::File(file) => anstream::eprintln!(
+            "Shared the file {} ({})",
+            sanitize(&file.name).bold(),
+            describe_file(file)
+        ),
+    }
+    anstream::eprintln!(
+        "  expires  {} ({}){}",
+        format_utc(created.expires_at),
+        until(now_secs(), created.expires_at),
+        args.max_views
+            .map(|n| format!(" · max {n} {}", if n == 1 { "open" } else { "opens" }))
+            .unwrap_or_default()
+    );
+    anstream::eprintln!("  code     {code}");
+    anstream::eprintln!(
+        "{}",
+        "The recipient needs a dotvault account: `dotvault open <link or code>`".dimmed()
+    );
+    anstream::println!("{link}");
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Picks which variables of `full` to share (all, `--keys`, or interactively).
+fn share_variables(
+    args: &ShareArgs,
+    full: EnvPayload,
+    source: &str,
+    note: Option<String>,
+) -> Result<EnvPayload> {
     let mut payload = if args.interactive {
         let names: Vec<String> = full.entries.iter().map(|e| e.key.clone()).collect();
         let picked = prompt::select("Variables to share:", &names)?;
@@ -99,56 +200,55 @@ pub fn share(ctx: &Ctx, args: ShareArgs) -> Result<ExitCode> {
     if payload.entries.is_empty() {
         bail!("there is nothing to share");
     }
-    payload.source = source;
-    payload.note = args.note.filter(|n| !n.trim().is_empty());
+    payload.source = source.to_string();
+    payload.note = note;
+    Ok(payload)
+}
 
-    // The key never reaches the server; it lives only in the link.
-    let share_key = random_key()?;
-    let sealed = crypto::seal_json(&share_key, &payload, AAD_SHARE)?;
-    if sealed.len() > MAX_SHARE_PAYLOAD_BYTES {
+/// A private key, keystore or service-account file is a credential someone could
+/// act as you with. Sharing one asks first; scripts must say `--yes`.
+fn confirm_key_material(file: &FilePayload, yes: bool) -> Result<()> {
+    let Some(kind) = Kind::parse(&file.secret_kind).filter(|k| k.is_key_material()) else {
+        return Ok(());
+    };
+    if yes {
+        return Ok(());
+    }
+    let name = sanitize(&file.name);
+    let kind = kind.as_str();
+    if !std::io::stdin().is_terminal() {
         bail!(
-            "that is too large to share ({} KiB, the limit is {} KiB); pick fewer variables",
-            sealed.len() / 1024,
-            MAX_SHARE_PAYLOAD_BYTES / 1024
+            "{name} holds a credential ({kind}): anyone who opens the link or code can use it as you. Pass --yes to share it from a script"
         );
     }
-    let created: CreateShareResponse = cloud
-        .api
-        .post(
-            "/shares",
-            &CreateShareRequest {
-                payload_ct: sealed,
-                ttl_secs: Some(ttl),
-                max_views: args.max_views,
-            },
-        )
-        .map_err(friendly)?;
+    let question = format!(
+        "{name} holds a credential ({kind}). Anyone who opens the link or code can use it as you. Share it?"
+    );
+    if prompt::confirm(&question)? {
+        Ok(())
+    } else {
+        bail!("not shared")
+    }
+}
 
-    let link = share_code::encode_link(cloud.api.base(), &created.id, &share_key);
-    let code = share_code::encode_code(&created.id, &share_key);
-    let names: Vec<&str> = payload.entries.iter().map(|e| e.key.as_str()).collect();
-
-    // Summary on stderr, the link alone on stdout so it can be piped or copied.
-    anstream::eprintln!(
-        "Shared {}: {}",
-        plural(names.len(), "variable"),
-        names.join(", ")
-    );
-    anstream::eprintln!(
-        "  expires  {} ({}){}",
-        format_utc(created.expires_at),
-        until(now_secs(), created.expires_at),
-        args.max_views
-            .map(|n| format!(" · max {n} {}", if n == 1 { "open" } else { "opens" }))
-            .unwrap_or_default()
-    );
-    anstream::eprintln!("  code     {code}");
-    anstream::eprintln!(
-        "{}",
-        "The recipient needs a dotvault account: `dotvault open <link or code>`".dimmed()
-    );
-    anstream::println!("{link}");
-    Ok(ExitCode::SUCCESS)
+/// Prints a received file's text, or says how to save a binary one.
+fn reveal_file(file: &FilePayload) -> Result<()> {
+    anstream::eprintln!("{} ({})", sanitize(&file.name).bold(), describe_file(file));
+    match file.as_text() {
+        Some(text) => {
+            let mut out = stdout().lock();
+            write!(out, "{}", sanitize_keeping_layout(text))?;
+            if !text.ends_with('\n') {
+                writeln!(out)?;
+            }
+        }
+        None => anstream::eprintln!(
+            "{}",
+            "this is not a text file; this share has been opened, so save it with --write PATH if you can open it again"
+                .dimmed()
+        ),
+    }
+    Ok(())
 }
 
 pub fn open(ctx: &Ctx, args: OpenArgs) -> Result<ExitCode> {
@@ -191,45 +291,60 @@ pub fn open(ctx: &Ctx, args: OpenArgs) -> Result<ExitCode> {
             }
             e => friendly(e),
         })?;
-    let payload: EnvPayload = crypto::open_json(&target.key, &opened.payload_ct, AAD_SHARE)
-        .map_err(|_| {
+    let payload: Payload =
+        crypto::open_json(&target.key, &opened.payload_ct, AAD_SHARE).map_err(|_| {
             anyhow!("could not decrypt the share; the key part of the link or code is wrong")
         })?;
 
     // The sender controls the source label and the note: both are sanitized before display.
     let mut header = format!("From {}", sanitize(&opened.owner).bold());
-    if !payload.source.is_empty() {
-        header.push_str(&format!(" · {}", sanitize(&payload.source)));
+    if !payload.source().is_empty() {
+        header.push_str(&format!(" · {}", sanitize(payload.source())));
     }
     header.push_str(&format!(" · {}", until(now_secs(), opened.expires_at)));
     if let Some(left) = opened.views_left {
         header.push_str(&format!(" · {} left", plural(left as usize, "open")));
     }
     anstream::eprintln!("{header}");
-    if let Some(note) = &payload.note {
+    if let Some(note) = payload.note() {
         anstream::eprintln!("Note: {}", sanitize(note));
     }
 
-    let pairs: Vec<(String, String)> = payload
-        .entries
-        .iter()
-        .map(|e| (e.key.clone(), e.value.clone()))
-        .collect();
-    if args.reveal {
-        print_pairs(&plural(pairs.len(), "variable"), &pairs, args.format, true)?;
-    }
-    if let Some(path) = &args.write {
-        anstream::println!(
-            "{}",
-            write_env_file(path, &payload, args.force, args.merge)?
-        );
+    match &payload {
+        Payload::Env(env) => {
+            let pairs: Vec<(String, String)> = env
+                .entries
+                .iter()
+                .map(|e| (e.key.clone(), e.value.clone()))
+                .collect();
+            if args.reveal {
+                print_pairs(&plural(pairs.len(), "variable"), &pairs, args.format, true)?;
+            }
+            if let Some(path) = &args.write {
+                anstream::println!("{}", write_env_file(path, env, args.force, args.merge)?);
+            }
+        }
+        Payload::File(file) => {
+            if args.reveal {
+                reveal_file(file)?;
+            }
+            if let Some(path) = &args.write {
+                if args.merge {
+                    bail!(
+                        "{} is a file and cannot be merged; use --write PATH (and --force to replace)",
+                        sanitize(&file.name)
+                    );
+                }
+                anstream::println!("{}", write_secret_file(path, file, args.force)?);
+            }
+        }
     }
     if let (Some(name), Some(vault_key)) = (&args.save, &vault_key) {
         let name = name.clone().unwrap_or_else(|| {
-            let what = if payload.source.is_empty() {
+            let what = if payload.source().is_empty() {
                 target.id[..8].to_string()
             } else {
-                sanitize(&payload.source).into_owned()
+                sanitize(payload.source()).into_owned()
             };
             format!("shared/{}/{what}", sanitize(&opened.owner))
         });

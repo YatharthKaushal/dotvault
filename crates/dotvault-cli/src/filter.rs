@@ -158,6 +158,8 @@ mod tests {
             size: 0,
             mtime: 0,
             keys: keys.iter().map(|s| s.to_string()).collect(),
+            kind: dotvault_core::secrets::Kind::Env,
+            detail: String::new(),
         }
     }
 

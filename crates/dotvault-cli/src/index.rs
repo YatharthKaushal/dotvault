@@ -11,9 +11,11 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
+use dotvault_core::secrets::Kind;
+
 use crate::scan::{self, Refresh};
 
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileRecord {
@@ -26,7 +28,12 @@ pub struct FileRecord {
     pub size: u64,
     /// Unix milliseconds.
     pub mtime: i64,
+    /// Variable names of an env file, or top-level key names of a JSON secret.
     pub keys: Vec<String>,
+    /// `Env` for env files; for anything else the label is the kind's name.
+    pub kind: Kind,
+    /// A short note about a secret file, such as `ed25519, passphrase`.
+    pub detail: String,
 }
 
 pub struct Index {
@@ -65,7 +72,9 @@ impl Index {
                     is_example INTEGER NOT NULL,
                     size INTEGER NOT NULL,
                     mtime INTEGER NOT NULL,
-                    keys TEXT NOT NULL
+                    keys TEXT NOT NULL,
+                    kind TEXT NOT NULL DEFAULT 'env',
+                    detail TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
             )?;
@@ -126,7 +135,7 @@ impl Index {
 
     pub fn all(&self) -> Result<Vec<FileRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT path, project, project_root, label, is_example, size, mtime, keys
+            "SELECT path, project, project_root, label, is_example, size, mtime, keys, kind, detail
              FROM files ORDER BY project COLLATE NOCASE, project_root, label",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -144,6 +153,8 @@ impl Index {
                     .filter(|k| !k.is_empty())
                     .map(String::from)
                     .collect(),
+                kind: Kind::parse(&r.get::<_, String>(8)?).unwrap_or(Kind::Env),
+                detail: r.get(9)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -200,8 +211,8 @@ impl Index {
 }
 
 const INSERT_SQL: &str = "INSERT OR REPLACE INTO files
-     (path, project, project_root, label, is_example, size, mtime, keys)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+     (path, project, project_root, label, is_example, size, mtime, keys, kind, detail)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
 fn insert_record(stmt: &mut rusqlite::Statement<'_>, r: &FileRecord) -> rusqlite::Result<usize> {
     stmt.execute(params![
@@ -213,6 +224,8 @@ fn insert_record(stmt: &mut rusqlite::Statement<'_>, r: &FileRecord) -> rusqlite
         r.size as i64,
         r.mtime,
         r.keys.join("\n"),
+        r.kind.as_str(),
+        r.detail,
     ])
 }
 
@@ -230,6 +243,8 @@ mod tests {
             size: 10,
             mtime: 5,
             keys: keys.iter().map(|s| s.to_string()).collect(),
+            kind: Kind::Env,
+            detail: String::new(),
         }
     }
 
@@ -251,6 +266,78 @@ mod tests {
         assert_eq!(back[0].project, "A");
         assert_eq!(back[1].keys, ["X", "Y"]);
         assert!(back[0].is_example);
+    }
+
+    #[test]
+    fn secret_kinds_and_details_round_trip_and_sort_with_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut idx = Index::open(&dir.path().join("i.db")).unwrap();
+        let mut key = rec("/h/.ssh/id_ed25519", ".ssh", "ssh-key", &[]);
+        key.kind = Kind::SshKey;
+        key.detail = "ed25519, passphrase".to_string();
+        let mut sa = rec(
+            "/p/a/sa.json",
+            "a",
+            "service-account",
+            &["client_email", "private_key"],
+        );
+        sa.kind = Kind::ServiceAccount;
+        idx.replace_all(
+            &[
+                key.clone(),
+                sa.clone(),
+                rec("/p/a/.env", "a", "default", &["X"]),
+            ],
+            "s",
+            1,
+            0,
+        )
+        .unwrap();
+        let back = idx.all().unwrap();
+        assert_eq!(back.len(), 3);
+        let find = |kind: Kind| back.iter().find(|r| r.kind == kind).unwrap();
+        assert_eq!(find(Kind::SshKey).detail, "ed25519, passphrase");
+        assert_eq!(
+            find(Kind::ServiceAccount).keys,
+            ["client_email", "private_key"]
+        );
+        assert_eq!(find(Kind::Env).detail, "");
+        // one project's env file and secret file sort together
+        let projects: Vec<&str> = back.iter().map(|r| r.project.as_str()).collect();
+        assert_eq!(projects, [".ssh", "a", "a"]);
+    }
+
+    #[test]
+    fn an_index_from_before_secret_files_is_rebuilt_not_broken() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("i.db");
+        {
+            // the layout version 1 wrote: no kind or detail column
+            let old = rusqlite::Connection::open(&path).unwrap();
+            old.execute_batch(
+                "CREATE TABLE files (path TEXT PRIMARY KEY, project TEXT NOT NULL,
+                    project_root TEXT NOT NULL, label TEXT NOT NULL, is_example INTEGER NOT NULL,
+                    size INTEGER NOT NULL, mtime INTEGER NOT NULL, keys TEXT NOT NULL);
+                 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO files VALUES ('/p/.env', 'p', '/p', 'default', 0, 1, 1, 'A');
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        }
+        let mut idx = Index::open(&path).unwrap();
+        assert!(
+            idx.all().unwrap().is_empty(),
+            "the old rows are dropped; a scan refills them"
+        );
+        assert_eq!(
+            idx.signature().unwrap(),
+            None,
+            "so the next command rescans"
+        );
+        let mut key = rec("/k/id_rsa", "k", "ssh-key", &[]);
+        key.kind = Kind::SshKey;
+        idx.replace_all(&[key], "s", 1, 0).unwrap();
+        assert_eq!(idx.all().unwrap()[0].kind, Kind::SshKey);
     }
 
     #[test]

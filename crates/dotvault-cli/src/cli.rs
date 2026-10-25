@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
+use dotvault_core::secrets::Kind;
 
 use crate::filter::FilterArgs;
 use crate::output::Format;
@@ -49,6 +50,10 @@ pub enum Command {
     Set(SetArgs),
     /// Remove variables
     Unset(UnsetArgs),
+    /// Treat files as secrets even if dotvault would not have noticed
+    Mark(MarkArgs),
+    /// Stop treating files as secrets (also silences a wrong guess)
+    Unmark(MarkArgs),
     /// Show the history of a variable, or of a whole file
     #[command(visible_alias = "history")]
     Log(LogArgs),
@@ -171,6 +176,21 @@ pub struct LsArgs {
     /// Rescan the remembered folders first
     #[arg(long)]
     pub refresh: bool,
+
+    /// List secret files (SSH keys, keystores, service-account JSON, ...) instead of env files
+    #[arg(long)]
+    pub secrets: bool,
+
+    /// Only this kind of file, for example ssh-key or keystore (repeatable; implies --secrets)
+    #[arg(long, value_name = "KIND", value_parser = parse_kind)]
+    pub kind: Vec<Kind>,
+}
+
+fn parse_kind(text: &str) -> Result<Kind, String> {
+    Kind::parse(text).ok_or_else(|| {
+        let names: Vec<&str> = Kind::SECRET.iter().map(|k| k.as_str()).collect();
+        format!("unknown kind {text:?}; one of: env, {}", names.join(", "))
+    })
 }
 
 /// How to pick a single env file. Without any of these, `./.env` is used.
@@ -246,6 +266,13 @@ pub struct GetArgs {
     /// Print or copy KEY=value instead of just the value (`-ckv` is short for `-c --kv`)
     #[arg(short = 'k', long)]
     pub kv: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct MarkArgs {
+    /// The files to mark or unmark
+    #[arg(required = true)]
+    pub paths: Vec<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -385,6 +412,11 @@ pub struct PushArgs {
     /// Only these variables (comma separated)
     #[arg(short, long, value_delimiter = ',', value_name = "KEYS")]
     pub keys: Vec<String>,
+
+    /// Store the file as it is instead of reading variables from it (any small file; SSH keys,
+    /// keystores and secret JSON are stored this way without the flag)
+    #[arg(long, conflicts_with = "keys")]
+    pub as_file: bool,
 }
 
 #[derive(Args, Debug)]
@@ -477,6 +509,15 @@ pub struct ShareArgs {
     /// A message the recipient sees
     #[arg(long)]
     pub note: Option<String>,
+
+    /// Share the file as it is instead of reading variables from it (any small file; SSH keys,
+    /// keystores and secret JSON are shared this way without the flag)
+    #[arg(long, conflicts_with_all = ["keys", "interactive", "vault"])]
+    pub as_file: bool,
+
+    /// Do not ask before sharing a private key, keystore or service-account file
+    #[arg(short = 'y', long)]
+    pub yes: bool,
 }
 
 #[derive(Args, Debug)]
