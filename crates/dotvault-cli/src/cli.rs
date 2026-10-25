@@ -49,6 +49,13 @@ pub enum Command {
     Set(SetArgs),
     /// Remove variables
     Unset(UnsetArgs),
+    /// Show the history of a variable, or of a whole file
+    #[command(visible_alias = "history")]
+    Log(LogArgs),
+    /// Put a variable back to an earlier value
+    Revert(RevertArgs),
+    /// Delete the recorded history of a variable or file
+    Forget(ForgetArgs),
     /// Open an env file in $VISUAL / $EDITOR
     Edit(EditArgs),
     /// Compare two env files (exit code 1 if they differ)
@@ -239,6 +246,55 @@ pub struct GetArgs {
     /// Print or copy KEY=value instead of just the value (`-ckv` is short for `-c --kv`)
     #[arg(short = 'k', long)]
     pub kv: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LogArgs {
+    /// Only this variable's versions (default: every change to the file)
+    pub key: Option<String>,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+
+    /// Show only the newest N entries
+    #[arg(short = 'n', long, value_name = "N")]
+    pub limit: Option<usize>,
+
+    /// Print real values instead of masks
+    #[arg(long)]
+    pub reveal: bool,
+
+    /// Machine-readable output (values only with --reveal)
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RevertArgs {
+    /// The variable to put back
+    #[arg(required = true)]
+    pub key: String,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+
+    /// The version to go back to, as numbered by `log` (default: the one before the latest)
+    #[arg(long, value_name = "N")]
+    pub to: Option<i64>,
+}
+
+#[derive(Args, Debug)]
+#[command(group(clap::ArgGroup::new("what").required(true).args(["key", "all"])))]
+pub struct ForgetArgs {
+    /// The variable whose history to delete
+    pub key: Option<String>,
+
+    #[command(flatten)]
+    pub flags: TargetFlags,
+
+    /// Delete the history of every variable in the file
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(Args, Debug)]

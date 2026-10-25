@@ -6,6 +6,7 @@ mod config;
 mod discover;
 mod filter;
 mod fsutil;
+mod history;
 mod index;
 mod keys;
 mod output;

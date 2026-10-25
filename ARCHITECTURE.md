@@ -28,8 +28,8 @@ crates/
   dotvault-core/src/    dotenv.rs  classify.rs  crypto.rs  share_code.rs  payload.rs  api.rs
   dotvault-cli/
     src/                cli.rs  scan.rs  discover.rs  index.rs  filter.rs  resolve.rs
-                        keys.rs  clipboard.rs  client.rs  session.rs  prompt.rs
-                        output.rs  fsutil.rs  config.rs
+                        keys.rs  clipboard.rs  history.rs  client.rs  session.rs
+                        prompt.rs  output.rs  fsutil.rs  config.rs
     src/commands/       ls.rs  view.rs  edit.rs  account.rs  vault.rs  share.rs  cloud.rs
     tests/              local.rs (fixture trees)  cloud.rs (real binary, real server)
   dotvault-server/
@@ -95,6 +95,31 @@ for 30 seconds and clears the clipboard only if it still holds the same text.
 use XWayland. Debug builds read `DOTVAULT_CLIPBOARD_FILE` and
 `DOTVAULT_CLIPBOARD_SECS` so the tests never touch a real clipboard; release
 builds ignore both.
+
+## History
+
+`history.rs` keeps a numbered version list per (file, variable) in `history.db`
+(SQLite), next to but separate from `index.db`: the index is a cache that is
+deleted and rebuilt when unreadable and never holds values, while history holds
+old and current values, is created owner-only (0600 on Unix) before SQLite opens
+it, uses a rollback journal so no `-wal` or `-shm` file can hold a secret, enables
+`secure_delete` and compacts after `forget`, and is never deleted on its own (an
+unreadable file is an error that leaves it alone). Files are named by canonical
+path.
+
+Every write path calls `Ctx::record(path, before, after, action)` after saving the
+file: `set`, `unset`, `edit` (the file is read before and after the editor),
+`pull`, and `revert`. `history::plan` is the pure core: it diffs the before and
+after variables, and when tracking is starting or the file no longer matches the
+last record it adds `baseline` and `external` versions first (stamped with the
+file's modified time, not now). It plans nothing when no variable changed, and
+`has_changes` checks that before the history is even opened, so a command that
+changes nothing never creates the file. The recording transaction starts as a
+writer (`BEGIN IMMEDIATE`) so two dotvault commands at once wait for each other
+instead of failing. A failure to record is a warning, because the file is already
+saved. `fingerprint` (in `dotvault-core`) is a six character display tag computed
+on the fly and never stored. Cloud history is not part of this: the server keeps
+20 whole-file versions per item but has no endpoint to read an old one.
 
 ## Keys
 

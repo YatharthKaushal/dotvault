@@ -478,6 +478,113 @@ fn tokens_from_the_environment_work_but_have_no_vault_key_and_logout_revokes_the
 // --- vault -----------------------------------------------------------------------
 
 #[test]
+fn pulling_into_a_file_records_each_changed_variable_in_its_history() {
+    let w = World::new();
+    let ada = w.user("ada", "ada-long-password-1");
+    ada.register();
+    ada.write("acme-api/package.json", "{}");
+    ada.write("acme-api/.env", ENV);
+    ada.dv()
+        .current_dir(ada.work.join("acme-api"))
+        .arg("push")
+        .assert()
+        .success();
+
+    ada.write("target.env", "EXTRA=1\nPORT=1111\n");
+    ada.dv()
+        .args([
+            "pull",
+            "acme-api/default",
+            "--out",
+            "target.env",
+            "--merge",
+            "--keys",
+            "PORT,DB_URL",
+        ])
+        .assert()
+        .success();
+
+    let versions = |key: &str| -> Vec<(String, Option<String>)> {
+        let out = ada
+            .dv()
+            .args(["log", key, "--json", "--reveal", "-f"])
+            .arg(ada.work.join("target.env"))
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let mut rows: Vec<serde_json::Value> = serde_json::from_slice(&out).unwrap();
+        rows.reverse();
+        rows.iter()
+            .map(|r| {
+                (
+                    r["action"].as_str().unwrap().to_string(),
+                    r["value"].as_str().map(str::to_string),
+                )
+            })
+            .collect()
+    };
+    // PORT was already in the file at 1111, then the pull changed it
+    assert_eq!(
+        versions("PORT"),
+        [
+            ("baseline".to_string(), Some("1111".to_string())),
+            ("pull".to_string(), Some("4000".to_string())),
+        ]
+    );
+    // DB_URL arrived with the pull
+    let db = versions("DB_URL");
+    assert_eq!(db.len(), 1);
+    assert_eq!(db[0].0, "pull");
+    assert!(db[0].1.as_deref().unwrap().contains("s3cr3t-DB-pw"));
+    // EXTRA was not touched, but it was there when tracking began
+    assert_eq!(
+        versions("EXTRA"),
+        [("baseline".to_string(), Some("1".to_string()))]
+    );
+
+    // and the pull can be undone
+    ada.dv()
+        .args(["revert", "PORT", "-f"])
+        .arg(ada.work.join("target.env"))
+        .assert()
+        .success();
+    assert!(
+        ada.read("target.env").contains("PORT=1111"),
+        "{}",
+        ada.read("target.env")
+    );
+
+    // a forced pull over a whole file records the variables it changes too
+    ada.write("forced.env", "PORT=2222\n");
+    ada.dv()
+        .args([
+            "pull",
+            "acme-api/default",
+            "--out",
+            "forced.env",
+            "--force",
+            "--keys",
+            "PORT",
+        ])
+        .assert()
+        .success();
+    let out = ada
+        .dv()
+        .args(["log", "PORT", "--json", "--reveal", "-f"])
+        .arg(ada.work.join("forced.env"))
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out).unwrap();
+    assert_eq!(rows[0]["action"], "pull");
+    assert_eq!(rows[0]["value"], "4000");
+}
+
+#[test]
 fn vault_push_pull_roundtrip_with_versions_merge_and_delete() {
     let w = World::new();
     let ada = w.user("ada", "ada-long-password-1");

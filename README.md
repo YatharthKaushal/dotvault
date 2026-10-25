@@ -9,6 +9,7 @@ Find, read, edit, store and share your `.env` files from one place.
 ([Update](#update), [Uninstall](#uninstall), [From source](#from-source),
 [Completions](#completions)) · [Usage](#usage)
 ([Copying to the clipboard](#copying-to-the-clipboard),
+[History](#history-of-a-variable),
 [Where dotvault looks](#where-dotvault-looks), [Commands](#commands)) ·
 [Configuration](#configuration) · [Self-hosting](#self-hosting) ·
 [Security](#security) · [Documentation](#documentation) · [License](#license)
@@ -43,6 +44,8 @@ features.
 - Edits in place with `set`, `unset` and `edit`. Comments and order are kept and
   writes are atomic.
 - Diffs two environments.
+- Keeps a git-like history of every variable it changes: `log` shows the versions,
+  `revert` goes back to one, and values stay masked unless you ask.
 - Cloud vault with `push` and `pull`. Encryption happens on your machine; the
   server stores only ciphertext.
 - Shares chosen variables through a link or short code, with an expiry, an open
@@ -191,6 +194,8 @@ dotvault set API_KEY=new -p acme-api -e production
 dotvault set SECRET                       # prompts, so it stays out of shell history
 dotvault unset OLD_KEY -f ./.env
 dotvault edit acme-api:local              # opens $VISUAL / $EDITOR
+dotvault log DATABASE_URL -p acme-api -e production   # every version of one variable
+dotvault revert DATABASE_URL -p acme-api -e production   # go back to the one before
 ```
 
 ### Copying to the clipboard
@@ -214,6 +219,49 @@ line. Where the platform has a way to ask, clipboard history is told to skip it
 
 Any program you run can read the clipboard while the value is on it, and a
 clipboard manager that ignores the history hint may keep a copy.
+
+### History of a variable
+
+Every time dotvault changes a variable (`set`, `unset`, `edit`, `pull`), it records
+a numbered version, like a commit for one variable. Nothing is recorded until
+dotvault first changes a file; looking at files (`ls`, `show`, `get`) records
+nothing.
+
+```bash
+dotvault log DATABASE_URL -p acme-api -e production
+# VERSION  WHEN      ACTION    VALUE
+# v3       2d ago    set       ******** 5dffa1
+# v2       1mo ago   external  ******** 70e1b5
+# v1       1y ago    baseline  ******** c8311b
+
+dotvault log -p acme-api -e production            # every change to the file, newest first
+dotvault log DATABASE_URL --reveal ...            # show the real values
+dotvault revert DATABASE_URL ...                  # back to the version before (--to 2 for a chosen one)
+dotvault forget DATABASE_URL ...                  # delete its recorded history (or --all)
+```
+
+- Values are masked, with a short tag so you can tell equal values apart. Add
+  `--reveal` to see them. `--json` leaves values out unless you add `--reveal`.
+- `baseline` is what a variable held when dotvault first changed its file.
+  `external` means the file differed from the last record, so it was edited
+  outside dotvault; those changes are noticed the next time dotvault changes the
+  file, and stamped with the file's modified time.
+- `revert` never rewrites history: going back is a new version, so you can go
+  forward again. A variable removed in the version you pick is removed again. History
+  stores values, not layout: a variable that `revert` brings back is added at the
+  end of the file, and a comment that sat on its old line is not restored.
+  After an edit made outside dotvault, plain `revert` goes back to the last
+  recorded value.
+- One `set A=1 B=2` or one `edit` is one change, shown together in `log`.
+- The history lives in `history.db` in the data folder (see `dotvault config`),
+  readable only by you. **It keeps old and current values in plain text**, the one
+  place besides your env files where dotvault stores them, so a backup or sync of
+  that folder copies them. It keeps the newest 50 versions of each variable
+  (`history_keep`). Turn it off with `history = false` in `config.toml`. `forget`
+  overwrites what it deletes, but copies already made by a backup or by the disk
+  itself are out of its reach.
+- A file is known by its path. If you move it, its old history stays under the
+  old path (`dotvault log -f OLD`), and the new location starts fresh.
 
 ### Where dotvault looks
 
@@ -307,6 +355,9 @@ dotvault shares revoke <id>
 | `set KEY=VALUE...` | Set variables, keeping comments and layout. A bare `KEY` prompts for the value. Creates the file if needed. |
 | `unset KEY...` | Remove variables. |
 | `edit [TARGET]` | Open the file in `$VISUAL` / `$EDITOR`. |
+| `log [KEY]` (alias `history`) | History of one variable, or of every change to the file. `-n N`, `--reveal`, `--json`. Pick the file with `-f` or `-p`/`-e`. |
+| `revert KEY [--to N]` | Put a variable back to an earlier version (default: the one before). Recorded as a new version. |
+| `forget KEY` / `forget --all` | Delete the recorded history of a variable, or of the whole file. |
 | `diff A B` | Compare two files. `--reveal` shows values. |
 | `register`, `login [--no-cache-key]`, `logout`, `whoami` | Account and session. `--server URL` selects the server (default: the hosted one). `--no-cache-key` keeps the vault key off disk, so vault commands ask for your password. |
 | `passwd`, `recover` | Change your password, or reset it with the recovery key. |
@@ -356,6 +407,8 @@ max_depth = 10
 auto_scan_secs = 600                   # rescan when the index is older than this
 ignore = ["playground"]                # extra folder names to skip
 example_suffixes = ["example", "sample", "template", "dist"]
+history = true                         # keep a history of variables dotvault changes (plain text, owner-only)
+history_keep = 50                      # versions kept per variable
 ```
 
 `node_modules`, `.git`, `target`, `vendor`, `dist`, `build`, `.venv` and similar

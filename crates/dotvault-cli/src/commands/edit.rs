@@ -10,6 +10,7 @@ use super::{read_text, resolve_target, Ctx, ResolveOpts};
 use crate::cli::{EditArgs, GetArgs, SetArgs, UnsetArgs};
 use crate::clipboard;
 use crate::fsutil;
+use crate::history::{Action, Before};
 use crate::keys;
 use crate::output::{render_pairs_for, sanitize, skipped_names, stdout, tilde, Format};
 
@@ -103,6 +104,7 @@ pub fn set(ctx: &Ctx, args: SetArgs) -> Result<ExitCode> {
     } else {
         String::new()
     };
+    let before = Before::read(&path);
     let mut env = DotEnv::parse(&text);
 
     let mut names = Vec::new();
@@ -116,15 +118,18 @@ pub fn set(ctx: &Ctx, args: SetArgs) -> Result<ExitCode> {
     }
 
     // Nothing is written unless every key was valid.
-    fsutil::write_atomic(&path, env.to_string().as_bytes())
+    let after = env.to_string();
+    fsutil::write_atomic(&path, after.as_bytes())
         .with_context(|| format!("cannot write {}", tilde(&path)))?;
     ctx.touch_index(&path);
+    ctx.record(&path, before.as_ref(), &after, Action::Set);
     anstream::println!("Set {} in {}", names.join(", "), tilde(&path));
     Ok(ExitCode::SUCCESS)
 }
 
 pub fn unset(ctx: &Ctx, args: UnsetArgs) -> Result<ExitCode> {
     let path = resolve_target(ctx, None, &args.flags, existing())?;
+    let before = Before::read(&path);
     let mut env = DotEnv::parse(&read_text(&path, true)?);
 
     let mut removed = Vec::new();
@@ -138,9 +143,11 @@ pub fn unset(ctx: &Ctx, args: UnsetArgs) -> Result<ExitCode> {
     }
 
     if !removed.is_empty() {
-        fsutil::write_atomic(&path, env.to_string().as_bytes())
+        let after = env.to_string();
+        fsutil::write_atomic(&path, after.as_bytes())
             .with_context(|| format!("cannot write {}", tilde(&path)))?;
         ctx.touch_index(&path);
+        ctx.record(&path, before.as_ref(), &after, Action::Unset);
         anstream::println!("Removed {} from {}", removed.join(", "), tilde(&path));
     }
     if missing.is_empty() {
@@ -158,8 +165,18 @@ pub fn unset(ctx: &Ctx, args: UnsetArgs) -> Result<ExitCode> {
 
 pub fn edit(ctx: &Ctx, args: EditArgs) -> Result<ExitCode> {
     let path = resolve_target(ctx, args.target.as_deref(), &args.flags, creatable())?;
+    let before = Before::read(&path);
     let status = run_editor(&path)?;
     ctx.touch_index(&path);
+    // Whatever the editor saved is diffed per variable, even if it then exited badly.
+    if let Ok(bytes) = std::fs::read(&path) {
+        ctx.record(
+            &path,
+            before.as_ref(),
+            &String::from_utf8_lossy(&bytes),
+            Action::Edit,
+        );
+    }
     if status.success() {
         Ok(ExitCode::SUCCESS)
     } else {

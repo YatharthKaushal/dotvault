@@ -116,7 +116,11 @@ pub fn pull(ctx: &Ctx, args: PullArgs) -> Result<ExitCode> {
 
     match &args.out {
         Some(out) => {
+            let before = crate::history::Before::read(out);
             anstream::println!("{}", write_env_file(out, &payload, args.force, args.merge)?);
+            if let Ok(after) = std::fs::read_to_string(out) {
+                ctx.record(out, before.as_ref(), &after, crate::history::Action::Pull);
+            }
         }
         None => {
             let pairs: Vec<(String, String)> = payload

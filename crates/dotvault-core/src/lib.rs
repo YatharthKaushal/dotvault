@@ -7,6 +7,7 @@ pub mod classify;
 pub mod crypto;
 pub mod dotenv;
 pub mod error;
+pub mod fingerprint;
 pub mod payload;
 pub mod share_code;
 

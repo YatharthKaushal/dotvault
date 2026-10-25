@@ -1,6 +1,7 @@
 mod account;
 mod cloud;
 mod edit;
+mod history;
 mod ls;
 mod share;
 mod vault;
@@ -43,6 +44,9 @@ pub fn run(cli: Cli) -> Result<ExitCode> {
         Command::Set(a) => edit::set(&ctx, a),
         Command::Unset(a) => edit::unset(&ctx, a),
         Command::Edit(a) => edit::edit(&ctx, a),
+        Command::Log(a) => history::log(&ctx, a),
+        Command::Revert(a) => history::revert(&ctx, a),
+        Command::Forget(a) => history::forget(&ctx, a),
         Command::Register(a) => account::register(&mut ctx, a),
         Command::Login(a) => account::login(&mut ctx, a),
         Command::Logout => account::logout(&ctx),
@@ -77,6 +81,9 @@ impl Command {
             Command::Set(a) => selects_project(None, &a.flags),
             Command::Unset(a) => selects_project(None, &a.flags),
             Command::Edit(a) => selects_project(a.target.as_deref(), &a.flags),
+            Command::Log(a) => selects_project(None, &a.flags),
+            Command::Revert(a) => selects_project(None, &a.flags),
+            Command::Forget(a) => selects_project(None, &a.flags),
             Command::Push(a) => selects_project(a.target.as_deref(), &a.flags),
             Command::Share(a) => {
                 a.vault.is_none() && selects_project(a.target.as_deref(), &a.flags)
@@ -191,6 +198,45 @@ impl Ctx {
         }
         let records = index.all()?;
         index.refresh_stale(records)
+    }
+
+    /// Records what a write changed in the history. The file is already saved, so
+    /// a failure here is a warning, never an error.
+    pub fn record(
+        &self,
+        path: &Path,
+        before: Option<&crate::history::Before>,
+        after: &str,
+        action: crate::history::Action,
+    ) {
+        if let Err(err) = self.try_record(path, before, after, action) {
+            anstream::eprintln!(
+                "{} the change was saved, but its history could not be recorded: {err:#}",
+                "warning:".yellow().bold()
+            );
+        }
+    }
+
+    /// Like [`Ctx::record`] but reports failure, and does nothing if history is off.
+    pub fn try_record(
+        &self,
+        path: &Path,
+        before: Option<&crate::history::Before>,
+        after: &str,
+        action: crate::history::Action,
+    ) -> Result<usize> {
+        if !self.config.history || !crate::history::has_changes(before, after) {
+            return Ok(0);
+        }
+        let mut history = crate::history::History::open(&self.dirs.history_file())?;
+        history.record(
+            &crate::history::key_for(path),
+            before,
+            after,
+            action,
+            self.config.history_keep,
+            now_secs(),
+        )
     }
 
     /// Keeps the index accurate after a file was changed. Best effort.

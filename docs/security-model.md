@@ -122,6 +122,7 @@ data is unrecoverable by design. Your local files are never affected.
 |---|---|---|
 | `config.toml` | server URL, scanned folders (the whole computer by default), settings | none needed, no secrets |
 | `index.db` | paths and **variable names** of env files, never values | disposable cache |
+| `history.db` | old and current **values** of variables dotvault changed, plain text | owner-only (0600 on Unix); on by default, `history = false` turns it off |
 | `session.json` | server, username, session token, wrapped vault key, and (by default) the vault key | mode `0600` on Unix, written atomically; a warning is printed if it is loosened |
 
 * Finding files reads env files on your machine to list their variable names. It
@@ -137,6 +138,16 @@ data is unrecoverable by design. Your local files are never affected.
   convention on Linux, `nspasteboard.org` on macOS, history, cloud sync and
   monitoring exclusions on Windows). Tools that ignore these hints may still keep
   a copy, which dotvault cannot remove.
+* `history.db` is the one local file besides your env files that holds values. It
+  exists so you can see and restore earlier values of a variable (`dotvault log`,
+  `revert`). It is plain text, owner-only, and uses a rollback journal so no
+  sidecar file holds a copy. It also keeps secrets you have since rotated or
+  removed, so anything that copies the data folder (a backup, a sync tool, a disk
+  image) copies them too. `dotvault forget` overwrites the values it deletes and
+  compacts the file, but it cannot reach copies a backup or the filesystem already
+  made. If that is not acceptable, set `history = false` in `config.toml` and run
+  `dotvault forget --all` for each file. Nothing in the history is ever sent to a
+  server.
 * The session token can be revoked: `dotvault logout` revokes it on the server.
 * Caching the vault key is a convenience. `dotvault login --no-cache-key` keeps
   it off disk; vault commands then ask for your password and unwrap it locally.

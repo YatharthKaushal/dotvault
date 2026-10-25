@@ -61,6 +61,11 @@ pub struct Config {
     pub ignore: Vec<String>,
     /// File-name segments that mark an env file as an example/template.
     pub example_suffixes: Vec<String>,
+    /// Keep a history of every variable dotvault changes (`dotvault log`). It holds
+    /// old and current values, so turn it off here if you do not want that.
+    pub history: bool,
+    /// How many versions of each variable the history keeps.
+    pub history_keep: usize,
 }
 
 impl Default for Config {
@@ -76,6 +81,8 @@ impl Default for Config {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+            history: true,
+            history_keep: 50,
         }
     }
 }
@@ -186,6 +193,11 @@ impl Dirs {
 
     pub fn index_file(&self) -> PathBuf {
         self.data.join("index.db")
+    }
+
+    /// Unlike the index this is not a cache and is never deleted on its own.
+    pub fn history_file(&self) -> PathBuf {
+        self.data.join("history.db")
     }
 }
 
