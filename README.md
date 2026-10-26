@@ -52,8 +52,9 @@ features.
   server stores only ciphertext.
 - Shares chosen variables through a link or short code, with an expiry, an open
   limit, revocation and a log of who opened it. The recipient needs an account.
-- One native binary of about 4 to 5 MiB depending on the platform. On Linux it starts in
-  under 2 ms and lists 600 env files across 300 projects in about 11 ms.
+- One native binary of about 4 to 5.5 MiB depending on the platform (CI fails the
+  build above 6 MiB). On Linux it starts in about 2 ms and lists 600 env files
+  across 300 projects in about 11 ms.
 
 ## Install
 
@@ -176,6 +177,10 @@ A **target** is what a command works on: a path (`./.env`), a project
 (`acme-api`) or `project:env` (`acme-api:production`). With no target, `./.env`
 is used. The environment is the part of the file name after `.env.`, so
 `.env.production` is `production` and a bare `.env` is `default`.
+
+Commands that take a key rather than a target (`get`, `set`, `unset`, `log`,
+`revert`, `forget`) pick the file with `-f FILE` (a path) or `-p PROJECT [-e ENV]`
+instead. `-f` takes a path and `-p` takes a project name.
 
 Local, no account:
 
@@ -416,21 +421,21 @@ dotvault shares revoke <id>
 | `roots add\|rm\|ls` | Manage the remembered folders. |
 | `ls [FOLDER]` | List env files. Filters: `-p/--project`, `-e/--env`, `--path`, `-k/--has-key`, `--examples`, `--only-examples`. Output: `--paths`, `--json`. `--refresh` rescans first. `--secrets` or `--kind KIND` list secret files instead. |
 | `mark FILE...` / `unmark FILE...` | Treat files as secrets by hand, or stop listing them (also silences a wrong guess). |
-| `show [TARGET]` | Show a file's variables. `--reveal`, `--keys A,B`, `--format table\|dotenv\|json\|shell\|powershell`. |
+| `show [TARGET]` | Show a file's variables. `--reveal`, `--keys A,B` (names or globs like `'STRIPE_*'`), `--format table\|dotenv\|json\|shell\|powershell`. A secret file (SSH key, keystore, secret JSON) is described instead, never printed; a JSON one shows its fields masked. |
 | `find PATTERN` | Find a variable (name or glob) across all files. Same filters as `ls`, plus `--reveal`, `--json`. Rows with the same variant letter hold the same value. |
-| `get KEY...` | Print raw values: one name prints the bare value, several names or a glob like `'STRIPE_*'` print `KEY=value` lines. Pick the file with `-f FILE` or `-p PROJECT [-e ENV]`. `-k`/`--kv` gives `KEY=value` even for one name. `-c` copies to the clipboard instead, and `-ckv` copies the whole pair. |
+| `get KEY...` | Print raw values: one name prints the bare value, several names or a glob like `'STRIPE_*'` print `KEY=value` lines. Pick the file with `-f FILE` or `-p PROJECT [-e ENV]`. `-k`/`--kv` gives `KEY=value` even for one name. `-c`/`--copy` copies to the clipboard instead, and `-ckv` copies the whole pair. |
 | `set KEY=VALUE...` | Set variables, keeping comments and layout. A bare `KEY` prompts for the value. Creates the file if needed. |
 | `unset KEY...` | Remove variables. |
 | `edit [TARGET]` | Open the file in `$VISUAL` / `$EDITOR`. |
-| `log [KEY]` (alias `history`) | History of one variable, or of every change to the file. `-n N`, `--reveal`, `--json`. Pick the file with `-f` or `-p`/`-e`. |
+| `log [KEY]` (alias `history`) | History of one variable, or of every change to the file. `-n N`/`--limit N`, `--reveal`, `--json`. Pick the file with `-f` or `-p`/`-e`. |
 | `revert KEY [--to N]` | Put a variable back to an earlier version (default: the one before). Recorded as a new version. |
 | `forget KEY` / `forget --all` | Delete the recorded history of a variable, or of the whole file. |
 | `diff A B` | Compare two files. `--reveal` shows values. |
 | `register`, `login [--no-cache-key]`, `logout`, `whoami` | Account and session. `--server URL` selects the server (default: the hosted one). `--no-cache-key` keeps the vault key off disk, so vault commands ask for your password. |
 | `passwd`, `recover` | Change your password, or reset it with the recovery key. |
 | `push [TARGET] [--name N] [--keys A,B] [--as-file]` | Store a file in your vault. The default name is `project/env`. Pushing again adds a version. SSH keys, keystores and secret JSON are stored whole, as files; `--as-file` does that for any small file. |
-| `pull NAME --out PATH` | Fetch a vault item. Refuses to overwrite unless you add `--merge` or `--force`. `--stdout` prints instead. |
-| `vault ls\|show\|rm` | List, show or delete vault items. Names can be abbreviated when unambiguous. |
+| `pull NAME --out PATH` | Fetch a vault item. Refuses to overwrite unless you add `--merge` or `--force`. `--stdout` prints variables instead. A file item (an SSH key, a keystore) is written exactly, readable only by you; `--merge`, `--keys` and `--stdout` do not apply to it and the folder must exist. |
+| `vault ls\|show\|rm` | List, show or delete vault items. Names can be abbreviated when unambiguous. `show` describes a file item and never prints it. |
 | `share [TARGET]` | Create a link and code. `--keys A,B` or `-i` choose the variables, `--vault NAME` shares a vault item, `--expires 30m\|24h\|7d` (1 minute to 30 days, default 24 h), `--max-views N`, `--note TEXT`, `--as-file`, `--yes` (skip the question asked before sharing a private key, keystore or service-account file). |
 | `open LINK\|CODE` | Open a share. Requires at least one of `--reveal`, `--write PATH` (with `--merge` or `--force`) or `--save [NAME]`, because opening uses up one of the allowed opens. A shared file is written exactly, readable only by you. |
 | `shares ls\|log\|revoke` | Manage the shares you created. A short unique prefix of the id is enough. |
@@ -442,7 +447,8 @@ there is no wildcard; `-e` and `-k` match whole names.
 
 Exit code `0` is success and `1` is an error. `diff` also returns `1` when the
 files differ, `find` when nothing matches, and `unset` / `show --keys` when a
-variable was not set.
+variable was not set. `get` fails, and prints nothing, if any name or glob it was
+given is not set.
 
 To load an environment into your shell:
 
