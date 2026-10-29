@@ -6,8 +6,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use assert_cmd::assert::Assert;
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -19,6 +21,25 @@ RAZORPAY_KEY_ID=rzp_id
 RAZORPAY_KEY_SECRET=\"has space & 'quote'\"
 LIVEKIT_URL=wss://livekit.example
 ";
+
+/// macOS creates a pipe in two steps (open it, then mark it close-on-exec), so a
+/// program started by another test thread in between inherits it. Here that
+/// program starts a `_clip-hold` helper, which keeps some other test's output
+/// pipe open for the whole hold time: that test waits for it, and by the time it
+/// reads the clipboard its own copy has been cleared. One test starts a program
+/// at a time.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+trait Run {
+    fn run(&mut self) -> Assert;
+}
+
+impl Run for Command {
+    fn run(&mut self) -> Assert {
+        let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+        self.assert()
+    }
+}
 
 struct Fixture {
     tmp: TempDir,
@@ -69,7 +90,7 @@ impl Fixture {
 }
 
 fn stdout_of(cmd: &mut Command) -> String {
-    String::from_utf8(cmd.assert().success().get_output().stdout.clone()).unwrap()
+    String::from_utf8(cmd.run().success().get_output().stdout.clone()).unwrap()
 }
 
 #[test]
@@ -119,7 +140,7 @@ fn a_missing_name_fails_and_prints_nothing() {
     b.dv(1)
         .args(["get", "DATABASE_URL", "NOPE", "ZZ_*", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .failure()
         .stdout("")
         .stderr(predicate::str::contains("NOPE is not set"))
@@ -132,12 +153,12 @@ fn names_and_globs_are_case_sensitive() {
     b.dv(1)
         .args(["get", "database_url", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .failure();
     b.dv(1)
         .args(["get", "razorpay_*", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .failure();
 }
 
@@ -163,7 +184,7 @@ fn show_keys_warns_about_what_matched_nothing() {
         .arg("show")
         .arg(&b.file)
         .args(["--keys", "DATABASE_URL,NOPE_*"])
-        .assert()
+        .run()
         .code(1)
         .stderr(predicate::str::contains("no variable matches NOPE_*"))
         .stdout(predicate::str::contains("DATABASE_URL"));
@@ -175,7 +196,7 @@ fn copy_puts_the_exact_value_on_the_clipboard_and_prints_nothing_else() {
     b.dv(30)
         .args(["get", "DATABASE_URL", "-c", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success()
         .stdout("")
         .stderr(predicate::str::contains(
@@ -195,7 +216,7 @@ fn copy_of_several_variables_is_dotenv_lines_without_a_trailing_newline() {
     b.dv(30)
         .args(["get", "RAZORPAY_*", "LIVEKIT_URL", "--copy", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success()
         .stdout("")
         .stderr(predicate::str::contains("Copied 3 variables"));
@@ -211,7 +232,7 @@ fn copy_is_cleared_after_the_delay() {
     b.dv(1)
         .args(["get", "DATABASE_URL", "-c", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success();
     assert_eq!(
         b.clipboard().as_deref(),
@@ -230,7 +251,7 @@ fn copy_leaves_alone_what_was_copied_in_the_meantime() {
     b.dv(2)
         .args(["get", "DATABASE_URL", "-c", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success();
     fs::write(&b.clip, "something else").unwrap();
     std::thread::sleep(Duration::from_secs(4));
@@ -246,7 +267,7 @@ fn copy_does_not_wait_for_the_helper_that_clears_it_later() {
     b.dv(20)
         .args(["get", "DATABASE_URL", "-c", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success();
     assert!(
         start.elapsed() < Duration::from_secs(10),
@@ -262,7 +283,7 @@ fn copy_of_a_missing_variable_touches_nothing() {
     b.dv(1)
         .args(["get", "NOPE", "-c", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .failure()
         .stderr(predicate::str::contains("NOPE is not set"));
     assert_eq!(b.clipboard().as_deref(), Some("keep me"));
@@ -281,7 +302,7 @@ fn copy_with_no_clipboard_says_so_and_never_prints_the_value() {
         .env_remove("WAYLAND_DISPLAY");
     cmd.args(["get", "DATABASE_URL", "-c", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .failure()
         .stdout("")
         .stderr(predicate::str::contains("no clipboard is available"))
@@ -299,7 +320,7 @@ fn the_value_never_appears_on_the_helpers_command_line() {
     b.dv(4)
         .args(["get", "DATABASE_URL", "-c", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success();
     let mut helpers = 0;
     for entry in fs::read_dir("/proc").unwrap().flatten() {
@@ -338,7 +359,7 @@ fn ckv_copies_the_whole_key_value_pair_and_prints_nothing_else() {
     b.dv(30)
         .args(["get", "DATABASE_URL", "-ckv", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success()
         .stdout("")
         .stderr(predicate::str::contains("Copied DATABASE_URL as KEY=value"))
@@ -358,7 +379,7 @@ fn ck_and_the_long_flags_do_the_same_as_ckv() {
             .args(flags)
             .arg("-f")
             .arg(&b.file)
-            .assert()
+            .run()
             .success()
             .stdout("");
         assert_eq!(
@@ -375,7 +396,7 @@ fn plain_c_still_copies_just_the_value() {
     b.dv(30)
         .args(["get", "LIVEKIT_URL", "-c", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success();
     assert_eq!(b.clipboard().as_deref(), Some("wss://livekit.example"));
 }
@@ -386,7 +407,7 @@ fn ckv_with_a_glob_or_several_names_changes_nothing_because_they_are_pairs_alrea
     b.dv(30)
         .args(["get", "DATABASE_URL", "LIVEKIT_URL", "-ckv", "-f"])
         .arg(&b.file)
-        .assert()
+        .run()
         .success()
         .stderr(predicate::str::contains("Copied 2 variables"));
     assert_eq!(
@@ -400,7 +421,7 @@ fn v_is_still_the_version_flag_on_get() {
     let b = Fixture::new();
     b.dv(1)
         .args(["get", "-v"])
-        .assert()
+        .run()
         .success()
         .stdout(predicate::str::starts_with("dotvault-get "));
 }
