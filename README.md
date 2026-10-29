@@ -10,7 +10,8 @@ Find, read, edit, store and share your `.env` files from one place.
 [Completions](#completions)) · [Usage](#usage)
 ([Copying to the clipboard](#copying-to-the-clipboard),
 [History](#history-of-a-variable), [Secret files](#secret-files),
-[Where dotvault looks](#where-dotvault-looks), [Commands](#commands)) ·
+[Where dotvault looks](#where-dotvault-looks), [Commands](#commands),
+[In scripts](#in-scripts)) ·
 [Configuration](#configuration) · [Self-hosting](#self-hosting) ·
 [Security](#security) · [Documentation](#documentation) · [License](#license)
 
@@ -212,7 +213,11 @@ is used. The environment is the part of the file name after `.env.`, so
 
 Commands that take a key rather than a target (`get`, `set`, `unset`, `log`,
 `revert`, `forget`) pick the file with `-f FILE` (a path) or `-p PROJECT [-e ENV]`
-instead. `-f` takes a path and `-p` takes a project name.
+instead. `-f` takes a path and `-p` takes a project name. `show`, `edit`, `push`
+and `share` accept the same three flags as well as a target.
+
+`dotvault COMMAND --help` (or `dotvault help COMMAND`) lists every option of a
+command, and `dotvault -v` prints the version.
 
 Local, no account:
 
@@ -449,30 +454,31 @@ dotvault shares revoke <id>
 
 | Command | Description |
 | :--- | :--- |
-| `scan [PATHS] [--system] [--depth N]` | Search folders for env files and remember them. With no paths, rescans the remembered folders (the whole computer, every drive, on first use). `--system` adds the whole computer to folders you named. |
-| `roots add\|rm\|ls` | Manage the remembered folders. |
-| `ls [FOLDER]` | List env files. Filters: `-p/--project`, `-e/--env`, `--path`, `-k/--has-key`, `--examples`, `--only-examples`. Output: `--paths`, `--json`. `--refresh` rescans first. `--secrets` or `--kind KIND` list secret files instead. |
+| `scan [PATHS] [--system] [--depth N]` | Search folders for env files and remember them. With no paths, rescans the remembered folders (the whole computer, every drive, on first use). `--system` adds the whole computer to folders you named. `--depth` limits how many levels down it goes. |
+| `roots add\|rm\|ls` | Manage the remembered folders: `add` remembers folders without scanning them yet, `rm` forgets them, `ls` lists them. |
+| `ls [FOLDER]` (alias `list`) | List env files, optionally only those inside `FOLDER`. Filters: `-p/--project`, `-e/--env`, `--path`, `-k/--has-key`, `--examples`, `--only-examples`; `-e`, `-k` and `--kind` can be repeated. Output: `--paths`, `--json`. `--refresh` rescans first. `--secrets` or `--kind KIND` list secret files instead. |
 | `mark FILE...` / `unmark FILE...` | Treat files as secrets by hand, or stop listing them (also silences a wrong guess). |
-| `show [TARGET]` | Show a file's variables. `--reveal`, `--keys A,B` (names or globs like `'STRIPE_*'`), `--format table\|dotenv\|json\|shell\|powershell`. A secret file (SSH key, keystore, secret JSON) is described instead, never printed; a JSON one shows its fields masked. |
-| `find PATTERN` | Find a variable (name or glob) across all files. Same filters as `ls`, plus `--reveal`, `--json`. Rows with the same variant letter hold the same value. |
+| `show [TARGET]` | Show a file's variables. `--reveal`, `-k/--keys A,B` (names or globs like `'STRIPE_*'`), `--format table\|dotenv\|json\|shell\|powershell` (default `table`). A bare project name never picks an example file; `--examples` allows it (or name it: `acme-api:example`). A secret file (SSH key, keystore, secret JSON) is described instead, never printed; a JSON one shows its fields masked. |
+| `find PATTERN` | Find a variable (name or glob) across all files. Filters as for `ls`: `-p`, `-e`, `--path`, `--examples`, `--only-examples`. Plus `--reveal`, `--json`. Rows with the same variant letter hold the same value. |
 | `get KEY...` | Print raw values: one name prints the bare value, several names or a glob like `'STRIPE_*'` print `KEY=value` lines. Pick the file with `-f FILE` or `-p PROJECT [-e ENV]`. `-k`/`--kv` gives `KEY=value` even for one name. `-c`/`--copy` copies to the clipboard instead, and `-ckv` copies the whole pair. |
 | `set KEY=VALUE...` | Set variables, keeping comments and layout. A bare `KEY` prompts for the value. Creates the file if needed. |
-| `unset KEY...` | Remove variables. |
+| `unset KEY...` | Remove variables. Exits `1` if one was not set. |
 | `edit [TARGET]` | Open the file in `$VISUAL` / `$EDITOR`. |
 | `log [KEY]` (alias `history`) | History of one variable, or of every change to the file. `-n N`/`--limit N`, `--reveal`, `--json`. Pick the file with `-f` or `-p`/`-e`. |
 | `revert KEY [--to N]` | Put a variable back to an earlier version (default: the one before). Recorded as a new version. |
 | `forget KEY` / `forget --all` | Delete the recorded history of a variable, or of the whole file. |
-| `diff A B` | Compare two files. `--reveal` shows values. |
-| `register`, `login [--no-cache-key]`, `logout`, `whoami` | Account and session. `--server URL` selects the server (default: the hosted one). `--no-cache-key` keeps the vault key off disk, so vault commands ask for your password. |
+| `diff A B` | Compare two files or projects. `-` marks a variable only in `A`, `+` only in `B`, `~` one whose value differs. `--reveal` shows the values. Exits `1` if they differ. |
+| `register`, `login`, `logout`, `whoami` | Account and session. `register`, `login` and `recover` take `--server URL` (default: the hosted one) and `-u/--username NAME`. `login` and `recover` also take `--no-cache-key`, which keeps the vault key off disk, so vault commands ask for your password. |
 | `passwd`, `recover` | Change your password, or reset it with the recovery key. |
-| `push [TARGET] [--name N] [--keys A,B] [--as-file]` | Store a file in your vault. The default name is `project/env`. Pushing again adds a version. SSH keys, keystores and secret JSON are stored whole, as files; `--as-file` does that for any small file. |
-| `pull NAME --out PATH` | Fetch a vault item. Refuses to overwrite unless you add `--merge` or `--force`. `--stdout` prints variables instead. A file item (an SSH key, a keystore) is written exactly, readable only by you; `--merge`, `--keys` and `--stdout` do not apply to it and the folder must exist. |
-| `vault ls\|show\|rm` | List, show or delete vault items. Names can be abbreviated when unambiguous. `show` describes a file item and never prints it. |
-| `share [TARGET]` | Create a link and code. `--keys A,B` or `-i` choose the variables, `--vault NAME` shares a vault item, `--expires 30m\|24h\|7d` (1 minute to 30 days, default 24 h), `--max-views N`, `--note TEXT`, `--as-file`, `--yes` (skip the question asked before sharing a private key, keystore or service-account file). |
-| `open LINK\|CODE` | Open a share. Requires at least one of `--reveal`, `--write PATH` (with `--merge` or `--force`) or `--save [NAME]`, because opening uses up one of the allowed opens. A shared file is written exactly, readable only by you. |
-| `shares ls\|log\|revoke` | Manage the shares you created. A short unique prefix of the id is enough. |
+| `push [TARGET] [-n/--name N] [-k/--keys A,B] [--as-file]` | Store a file in your vault. The default name is `project/env`. Pushing again adds a version. SSH keys, keystores and secret JSON are stored whole, as files; `--as-file` does that for any small file. |
+| `pull NAME [-o/--out PATH] [-k/--keys A,B]` | Fetch a vault item. Refuses to overwrite unless you add `--merge` or `--force`. `--stdout` prints variables instead. A file item (an SSH key, a keystore) is written exactly, readable only by you; `--merge`, `--keys` and `--stdout` do not apply to it and the folder must exist. |
+| `vault ls\|show\|rm` | List, show or delete vault items. Names can be abbreviated when unambiguous. `ls` takes `--json`. `show` takes `--reveal`, `--format` and `-k/--keys` like the local `show`, and describes a file item without printing it. `rm` asks first unless you add `-y/--yes`. |
+| `share [TARGET]` | Create a link and code. `--keys A,B` or `-i/--interactive` choose the variables, `--vault NAME` shares a vault item, `--expires 30m\|24h\|7d` (1 minute to 30 days, default 24 h), `--max-views N`, `--note TEXT`, `--as-file`, `-y/--yes` (skip the question asked before sharing a private key, keystore or service-account file). |
+| `open LINK\|CODE` | Open a share. Requires at least one of `--reveal`, `-w/--write PATH` (with `--merge` or `--force`) or `--save [NAME]`, because opening uses up one of the allowed opens. `--format` chooses how `--reveal` prints, as for `show`. A shared file is written exactly, readable only by you. |
+| `shares ls\|log\|revoke` | Manage the shares you created. A short unique prefix of the id is enough. `ls` and `log` take `--json`. |
 | `config` | Show where dotvault keeps its files. |
 | `completions SHELL` | Print a completion script. |
+| `help [COMMAND]` | Same as `COMMAND --help`. |
 
 Filters accept globs (`-p 'acme-*'`). `-p` and `--path` match by substring when
 there is no wildcard; `-e` and `-k` match whole names.
@@ -487,6 +493,30 @@ To load an environment into your shell:
 ```bash
 eval "$(dotvault show acme-api:local --format shell --reveal)"                           # bash, zsh
 dotvault show acme-api:local --format powershell --reveal | Invoke-Expression            # PowerShell
+```
+
+### In scripts
+
+- Output you can parse: `ls`, `find`, `log`, `vault ls`, `shares ls` and `shares log`
+  take `--json`, and `show` and `vault show` take `--format json`. `ls --json` lists
+  names, never values; `find --json` and `show` add values only with `--reveal`.
+  `ls --paths` prints one path per line.
+- `dotvault get KEY` prints the bare value and nothing else, so `$(...)` works. It
+  fails, and prints nothing, if the name is not set.
+- The exit codes above let `dotvault diff A B` and `dotvault find KEY` gate a script.
+- Several `set`, `unset`, `revert` or `pull` commands may run at the same time on one
+  file: they take turns, and none loses its change. Reading never waits.
+- Accounts work without prompts through the `DOTVAULT_*` variables listed under
+  [Configuration](#configuration).
+
+```bash
+dotvault ls --paths -k 'STRIPE_*'                               # files that define a variable
+dotvault ls --json | jq -r '.[] | select(.project == "acme-api") | .path'
+dotvault diff acme-api:example acme-api:local                   # example variables your file lacks
+for e in local staging production; do                           # one change, every environment
+  dotvault set API_URL=https://api.example.com -p acme-api -e "$e"
+done
+DB=$(dotvault get DATABASE_URL -p acme-api -e production)
 ```
 
 ## Configuration
@@ -533,8 +563,10 @@ folders are always skipped.
 | `DOTVAULT_TOKEN` | A session token for scripts, with `DOTVAULT_SERVER`. It can share and open but has no vault key. |
 | `DOTVAULT_HOME` | Home folder, used to shorten paths to `~` and to skip hidden folders inside it, for containers and tests. |
 | `DOTVAULT_SCAN_ROOTS` | Folders to search when none are saved yet, instead of the whole computer (a `PATH`-style list). |
+| `DOTVAULT_CONFIG_DIR`, `DOTVAULT_DATA_DIR` | Where the config and the data (index, history, locks) live. |
 | `VISUAL`, `EDITOR` | The editor for `edit`. |
 | `NO_COLOR` | Disable colors. |
+| `DOTVAULT_BIND`, `DOTVAULT_DB`, `DOTVAULT_PUBLIC_URL`, `DOTVAULT_TRUST_PROXY`, `DOTVAULT_SERVER_SECRET` | Settings of `dotvault-server`, not of the CLI. See [docs/deploy.md](docs/deploy.md). |
 
 Environment variables are visible to other processes of the same user, so prefer
 the interactive prompts for everyday use.
@@ -548,6 +580,10 @@ dotvault register --server http://localhost:8080
 
 Pass `--server` on the first `register` or `login`: without it the CLI would use the
 hosted server. After the first success it remembers the address.
+
+`dotvault-server` takes `--bind ADDR` (default `127.0.0.1:8080`) and `--healthcheck`,
+which exits `0` if a running server answers; everything else is set through the
+`DOTVAULT_*` variables in [docs/deploy.md](docs/deploy.md).
 
 For real use you need a Linux machine, a domain name and a TLS proxy (the client
 refuses plain `http://` except for localhost), plus backups of the database.
