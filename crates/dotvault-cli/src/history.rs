@@ -15,13 +15,51 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use dotvault_core::dotenv::DotEnv;
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, ErrorCode, TransactionBehavior};
 
 const SCHEMA_VERSION: i32 = 1;
+
+/// How long a command keeps trying while another dotvault command holds the history.
+const BUSY_WAIT: Duration = Duration::from_secs(10);
+
+/// Whether SQLite gave up because another connection holds the file.
+fn is_busy(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<rusqlite::Error>(),
+            Some(rusqlite::Error::SqliteFailure(f, _))
+                if matches!(f.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+        )
+    })
+}
+
+/// Runs `op` again while the history is busy. SQLite's own busy timeout is not
+/// enough: in some states (a writer still syncing its commit when we open the file,
+/// or a reader that cannot be upgraded without risking a deadlock) it reports
+/// "database is locked" at once instead of waiting, and on a slow disk that is a
+/// lost history entry for a change that was saved fine. `op` must leave nothing
+/// behind when it fails.
+fn retry_when_busy<T>(op: impl FnMut() -> Result<T>) -> Result<T> {
+    retry_when_busy_for(BUSY_WAIT, op)
+}
+
+fn retry_when_busy_for<T>(limit: Duration, mut op: impl FnMut() -> Result<T>) -> Result<T> {
+    let started = Instant::now();
+    let mut pause = Duration::from_millis(5);
+    loop {
+        match op() {
+            Err(e) if is_busy(&e) && started.elapsed() < limit => {
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(Duration::from_millis(100));
+            }
+            other => return other,
+        }
+    }
+}
 
 /// What produced a version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,7 +269,7 @@ impl History {
         }
         create_private(path)
             .with_context(|| format!("cannot create the history file {}", path.display()))?;
-        Self::open_existing_file(path)
+        retry_when_busy(|| Self::open_existing_file(path))
     }
 
     /// Opens the history only if it exists, so that merely looking never creates it.
@@ -239,7 +277,7 @@ impl History {
         if !path.exists() {
             return Ok(None);
         }
-        Self::open_existing_file(path).map(Some)
+        retry_when_busy(|| Self::open_existing_file(path)).map(Some)
     }
 
     fn open_existing_file(path: &Path) -> Result<History> {
@@ -314,6 +352,18 @@ impl History {
         keep: usize,
         now: i64,
     ) -> Result<usize> {
+        retry_when_busy(|| self.record_once(file, before, after_text, action, keep, now))
+    }
+
+    fn record_once(
+        &mut self,
+        file: &str,
+        before: Option<&Before>,
+        after_text: &str,
+        action: Action,
+        keep: usize,
+        now: i64,
+    ) -> Result<usize> {
         let after = pairs_of(after_text);
         let before_pairs = before.map(|b| pairs_of(&b.text));
         // A writer from the start: a transaction that reads first and writes later
@@ -380,6 +430,10 @@ impl History {
 
     /// Every version of the file's variables (or of one variable), oldest first.
     pub fn rows(&self, file: &str, key: Option<&str>) -> Result<Vec<Row>> {
+        retry_when_busy(|| self.rows_once(file, key))
+    }
+
+    fn rows_once(&self, file: &str, key: Option<&str>) -> Result<Vec<Row>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.id, c.at, c.action, v.key, v.version, v.value
              FROM versions v JOIN changes c ON c.id = v.change_id
@@ -404,16 +458,18 @@ impl History {
     /// Deletes the history of one variable, or of the whole file. The values are
     /// overwritten and the file is compacted. Returns how many versions went.
     pub fn forget(&mut self, file: &str, key: Option<&str>) -> Result<usize> {
-        let removed = self.conn.execute(
-            "DELETE FROM versions WHERE path = ?1 AND (?2 IS NULL OR key = ?2)",
-            params![file, key],
-        )?;
-        self.conn.execute(
-            "DELETE FROM changes WHERE id NOT IN (SELECT DISTINCT change_id FROM versions)",
-            [],
-        )?;
-        self.conn
-            .execute_batch("VACUUM")
+        let removed = retry_when_busy(|| {
+            let removed = self.conn.execute(
+                "DELETE FROM versions WHERE path = ?1 AND (?2 IS NULL OR key = ?2)",
+                params![file, key],
+            )?;
+            self.conn.execute(
+                "DELETE FROM changes WHERE id NOT IN (SELECT DISTINCT change_id FROM versions)",
+                [],
+            )?;
+            Ok(removed)
+        })?;
+        retry_when_busy(|| Ok(self.conn.execute_batch("VACUUM")?))
             .map_err(|e| anyhow!("history was cleared but could not be compacted: {e}"))?;
         Ok(removed)
     }
@@ -825,6 +881,60 @@ mod tests {
             Err(e) => e.to_string(),
         };
         assert!(err.contains("newer dotvault"), "{err}");
+    }
+
+    fn busy() -> anyhow::Error {
+        anyhow::Error::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        ))
+        .context("not a usable history file")
+    }
+
+    #[test]
+    fn busy_is_retried_until_it_clears() {
+        let mut calls = 0;
+        let got = retry_when_busy(|| {
+            calls += 1;
+            if calls < 4 {
+                Err(busy())
+            } else {
+                Ok(calls)
+            }
+        });
+        assert_eq!(got.unwrap(), 4);
+    }
+
+    #[test]
+    fn other_errors_are_not_retried() {
+        let mut calls = 0;
+        let got: Result<()> = retry_when_busy(|| {
+            calls += 1;
+            Err(anyhow!("disk is full"))
+        });
+        assert!(got.is_err());
+        assert_eq!(calls, 1);
+
+        let corrupt = anyhow::Error::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+            None,
+        ));
+        assert!(!is_busy(&corrupt));
+        assert!(is_busy(&busy()));
+        let locked = anyhow::Error::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_LOCKED),
+            None,
+        ));
+        assert!(is_busy(&locked));
+    }
+
+    #[test]
+    fn a_history_that_stays_busy_gives_up() {
+        let limit = Duration::from_millis(150);
+        let started = Instant::now();
+        let got: Result<()> = retry_when_busy_for(limit, || Err(busy()));
+        assert!(is_busy(&got.unwrap_err()));
+        assert!(started.elapsed() >= limit);
     }
 
     #[test]
