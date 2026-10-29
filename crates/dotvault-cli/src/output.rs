@@ -328,7 +328,7 @@ pub fn parse_duration(text: &str) -> anyhow::Result<u64> {
 /// `45m`, `24h`, `7d`: the largest unit that divides evenly, else the largest that fits.
 pub fn humanize_secs(secs: u64) -> String {
     for (unit, size) in [("d", 86_400), ("h", 3600), ("m", 60)] {
-        if secs >= size && secs % size == 0 {
+        if secs >= size && secs.is_multiple_of(size) {
             return format!("{}{unit}", secs / size);
         }
     }

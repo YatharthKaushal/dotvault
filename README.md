@@ -42,7 +42,8 @@ features.
 - Copies a value, or several, to the clipboard with `get -c` and clears it again
   after 30 seconds.
 - Edits in place with `set`, `unset` and `edit`. Comments and order are kept and
-  writes are atomic.
+  writes are atomic. Commands that change the same file at the same moment take
+  turns, so none of them loses its change.
 - Diffs two environments.
 - Finds SSH keys, private keys, keystores, service-account and other secret JSON,
   and credential dotfiles, marks them, and stores or shares them like env files.
@@ -180,9 +181,9 @@ remove those.
 
 | Platform | Needs |
 | :--- | :--- |
-| Linux | Rust 1.85+, a C compiler (`build-essential`, `gcc` or `base-devel`) |
-| macOS | Rust 1.85+, Xcode Command Line Tools (`xcode-select --install`) |
-| Windows | Rust 1.85+, [C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) ("Desktop development with C++") |
+| Linux | Rust 1.89+, a C compiler (`build-essential`, `gcc` or `base-devel`) |
+| macOS | Rust 1.89+, Xcode Command Line Tools (`xcode-select --install`) |
+| Windows | Rust 1.89+, [C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) ("Desktop development with C++") |
 
 Install Rust with [rustup](https://rustup.rs/), then on any platform:
 
@@ -501,6 +502,10 @@ Override the locations with `DOTVAULT_CONFIG_DIR` and `DOTVAULT_DATA_DIR`.
 `index.db` is a cache of file locations and variable names (never values). It
 refreshes itself; run `dotvault scan` to pick up new folders and
 `dotvault ls --refresh` to pick up new files.
+
+The `locks` folder next to it holds a few small empty files. Commands that change
+an env file hold one while they work, so two of them never overwrite each other.
+Nothing is added to your project folders.
 
 ```toml
 # config.toml

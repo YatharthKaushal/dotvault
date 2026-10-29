@@ -21,6 +21,7 @@ use crate::config::{Config, Dirs, RootsPlan};
 use dotvault_core::secrets::Kind;
 
 use crate::discover;
+use crate::fsutil;
 use crate::index::{FileRecord, Index};
 use crate::output::{humanize_secs, now_secs, tilde};
 use crate::resolve::{self, parse_target, Target};
@@ -212,6 +213,24 @@ impl Ctx {
         }
         let records = index.all()?;
         index.refresh_stale(records)
+    }
+
+    /// Waits for the turn to change `path`, so that two commands working on the same
+    /// env file at once cannot each start from the old text and lose the other's
+    /// change. Hold the result until the new text is written and recorded. Gives up,
+    /// before anything is written, if another command keeps the file for too long.
+    /// If the lock cannot be set up at all (a read-only data folder), the command goes
+    /// on without it, as it always did.
+    pub fn lock_file(&self, path: &Path) -> Result<Option<fsutil::EditLock>> {
+        match fsutil::lock_for_edit(&self.dirs.lock_dir(), path) {
+            Ok(lock) => Ok(Some(lock)),
+            Err(err) if err.kind() == std::io::ErrorKind::TimedOut => bail!(
+                "another dotvault command has been changing {} for {} seconds; run this again in a moment",
+                tilde(path),
+                fsutil::EDIT_LOCK_WAIT.as_secs()
+            ),
+            Err(_) => Ok(None),
+        }
     }
 
     /// Records what a write changed in the history. The file is already saved, so

@@ -213,6 +213,11 @@ impl Dirs {
     pub fn history_file(&self) -> PathBuf {
         self.data.join("history.db")
     }
+
+    /// The small lock files that make commands changing one env file take turns.
+    pub fn lock_dir(&self) -> PathBuf {
+        self.data.join("locks")
+    }
 }
 
 fn env_dir(var: &str) -> Option<PathBuf> {

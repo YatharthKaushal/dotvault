@@ -163,6 +163,7 @@ pub fn pull(ctx: &Ctx, args: PullArgs) -> Result<ExitCode> {
 
     match &args.out {
         Some(out) => {
+            let _lock = ctx.lock_file(out)?;
             let before = crate::history::Before::read(out);
             anstream::println!("{}", write_env_file(out, &payload, args.force, args.merge)?);
             if let Ok(after) = std::fs::read_to_string(out) {

@@ -12,7 +12,7 @@ Caddy. Docker and Fly.io are covered at the end.
 | **A domain name** | An A (and AAAA) record pointing at the machine. The TLS certificate is issued for it. |
 | **Open ports** | 80 and 443 from the internet. The server itself listens on `127.0.0.1:8080` and should not be exposed. |
 | **A TLS proxy** | The server speaks plain HTTP, and the CLI refuses plain `http://` except for `localhost`. This guide uses [Caddy](https://caddyserver.com/docs/install), which gets and renews a Let's Encrypt certificate by itself. The CLI trusts only public certificate authorities, so self-signed and private-CA certificates do not work. |
-| **To build the binary** | Rust 1.85+ and a C compiler (`build-essential`) on the machine that builds it. There is no prebuilt server download yet. Docker is the alternative. |
+| **To build the binary** | Rust 1.89+ and a C compiler (`build-essential`) on the machine that builds it. There is no prebuilt server download yet. Docker is the alternative. |
 | **For backups** | The `sqlite3` command (`sudo apt install sqlite3`) and somewhere else to keep the copies. |
 
 ## Steps

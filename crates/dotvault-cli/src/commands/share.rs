@@ -321,6 +321,7 @@ pub fn open(ctx: &Ctx, args: OpenArgs) -> Result<ExitCode> {
                 print_pairs(&plural(pairs.len(), "variable"), &pairs, args.format, true)?;
             }
             if let Some(path) = &args.write {
+                let _lock = ctx.lock_file(path)?;
                 anstream::println!("{}", write_env_file(path, env, args.force, args.merge)?);
             }
         }

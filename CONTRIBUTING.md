@@ -5,7 +5,7 @@ formats may change.
 
 ## Requirements
 
-- Rust 1.85 or newer ([rustup](https://rustup.rs/)).
+- Rust 1.89 or newer ([rustup](https://rustup.rs/)).
 - A C compiler, because the bundled SQLite and the TLS library build C code:
   `build-essential` / `gcc` / `base-devel` on Linux, Xcode Command Line Tools on
   macOS, the Visual Studio C++ Build Tools on Windows.

@@ -212,6 +212,7 @@ fn file_view(
 
 pub fn revert(ctx: &Ctx, args: RevertArgs) -> Result<ExitCode> {
     let path = resolve_target(ctx, None, &args.flags, existing())?;
+    let _lock = ctx.lock_file(&path)?;
     let file = store::key_for(&path);
     let text = read_text(&path, true)?;
     let before = Before::read(&path).ok_or_else(|| anyhow!("cannot read {}", tilde(&path)))?;

@@ -99,6 +99,26 @@ fn text_for(
 
 pub fn set(ctx: &Ctx, args: SetArgs) -> Result<ExitCode> {
     let path = resolve_target(ctx, None, &args.flags, creatable())?;
+
+    // Values are asked for before the file is locked, so that someone typing never
+    // holds up another command. A file that cannot be read, or a name that cannot be
+    // set, is refused before a secret is typed for it.
+    let mut assignments = Vec::new();
+    for assignment in &args.assignments {
+        let (key, value) = match assignment.split_once('=') {
+            Some((k, v)) => (k.to_string(), v.to_string()),
+            None => {
+                if path.exists() {
+                    read_text(&path, true)?;
+                }
+                DotEnv::new().set(assignment, "")?;
+                (assignment.clone(), prompt_value(assignment)?)
+            }
+        };
+        assignments.push((key, value));
+    }
+
+    let _lock = ctx.lock_file(&path)?;
     let text = if path.exists() {
         read_text(&path, true)?
     } else {
@@ -108,13 +128,9 @@ pub fn set(ctx: &Ctx, args: SetArgs) -> Result<ExitCode> {
     let mut env = DotEnv::parse(&text);
 
     let mut names = Vec::new();
-    for assignment in &args.assignments {
-        let (key, value) = match assignment.split_once('=') {
-            Some((k, v)) => (k.to_string(), v.to_string()),
-            None => (assignment.clone(), prompt_value(assignment)?),
-        };
-        env.set(&key, &value)?;
-        names.push(key);
+    for (key, value) in &assignments {
+        env.set(key, value)?;
+        names.push(key.clone());
     }
 
     // Nothing is written unless every key was valid.
@@ -129,6 +145,7 @@ pub fn set(ctx: &Ctx, args: SetArgs) -> Result<ExitCode> {
 
 pub fn unset(ctx: &Ctx, args: UnsetArgs) -> Result<ExitCode> {
     let path = resolve_target(ctx, None, &args.flags, existing())?;
+    let _lock = ctx.lock_file(&path)?;
     let before = Before::read(&path);
     let mut env = DotEnv::parse(&read_text(&path, true)?);
 
