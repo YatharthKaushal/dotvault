@@ -4,7 +4,8 @@
 #
 # It downloads the archive for this platform from GitHub Releases, checks its
 # SHA-256 checksum, copies dotvault.exe into place and adds that folder to your
-# user PATH. It does not need administrator rights.
+# user PATH (and to this PowerShell window, so dotvault works straight away). It
+# does not need administrator rights.
 #
 # Environment variables (set them before running):
 #   DOTVAULT_VERSION          release tag to install, for example v0.1.0 (default: latest)
@@ -12,6 +13,55 @@
 #   DOTVAULT_NO_MODIFY_PATH   set to 1 to leave your PATH alone
 #   DOTVAULT_DOWNLOAD_URL     base URL that holds the release files (default: GitHub Releases)
 #   DOTVAULT_TARGET           use this target triple instead of detecting one
+
+# Adds $Dir to the user PATH and changes nothing else in it. The value is read and
+# written through the registry so that entries such as %JAVA_HOME%\bin stay
+# unexpanded and the value keeps its type (REG_EXPAND_SZ). Reading it with
+# [Environment]::GetEnvironmentVariable expands the variables, and writing it back
+# with SetEnvironmentVariable stores plain text, which would freeze every entry at
+# today's value.
+# Returns $true if it added the folder and $false if it was already listed.
+function Add-DotvaultToUserPath {
+    param([string]$Dir)
+    $normalized = $Dir.TrimEnd('\')
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        $raw = ''
+        $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+        if ($key.GetValueNames() -contains 'Path') {
+            $raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $kind = $key.GetValueKind('Path')
+            if (($kind -ne [Microsoft.Win32.RegistryValueKind]::String) -and ($kind -ne [Microsoft.Win32.RegistryValueKind]::ExpandString)) {
+                $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+            }
+        }
+        # An entry counts as present whether it is written out or through a variable.
+        $present = $raw.Split(';') | Where-Object { $_ } | Where-Object {
+            [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $normalized
+        }
+        if ($present) {
+            return $false
+        }
+        if ($raw) {
+            $newRaw = $raw.TrimEnd(';') + ';' + $Dir
+        } else {
+            $newRaw = $Dir
+        }
+        $key.SetValue('Path', $newRaw, $kind)
+    } finally {
+        $key.Close()
+    }
+    # A direct registry write does not tell running programs. Setting and removing a
+    # throwaway variable makes .NET broadcast WM_SETTINGCHANGE, so terminals opened
+    # from the Start menu see the new PATH without logging off.
+    try {
+        [Environment]::SetEnvironmentVariable('DOTVAULT_PATH_REFRESH', '1', 'User')
+        [Environment]::SetEnvironmentVariable('DOTVAULT_PATH_REFRESH', $null, 'User')
+    } catch {
+        # Only costs the convenience of not having to log off.
+    }
+    return $true
+}
 
 function Install-Dotvault {
     # Errors use `throw`, not `exit`: when this runs through `iex`, `exit`
@@ -103,17 +153,13 @@ function Install-Dotvault {
         Write-Host "installed $version to $dest"
 
         if ($env:DOTVAULT_NO_MODIFY_PATH -ne '1') {
-            $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-            $entries = @()
-            if ($userPath) {
-                $entries = $userPath.Split(';') | Where-Object { $_ }
-            }
             $normalized = $dir.TrimEnd('\')
-            $present = $entries | Where-Object { $_.TrimEnd('\') -ieq $normalized }
-            if (-not $present) {
-                $newPath = (@($entries) + $dir) -join ';'
-                [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-                Write-Host "added $dir to your user PATH; open a new terminal to use it"
+            try {
+                if (Add-DotvaultToUserPath -Dir $dir) {
+                    Write-Host "added $dir to your user PATH. dotvault works in this window now; terminals that were already open need to be reopened."
+                }
+            } catch {
+                Write-Host "warning: could not change your user PATH ($($_.Exception.Message)). Add $dir to it yourself to run dotvault from anywhere."
             }
             # Make it usable in this session too.
             if (-not (($env:Path -split ';') | Where-Object { $_ -and $_.TrimEnd('\') -ieq $normalized })) {

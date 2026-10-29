@@ -71,19 +71,19 @@
   <section class="platform" id="linux">
     <h3>Linux</h3>
     <div class="cmd"><pre><code>curl -fsSL https://yatharthkaushal.github.io/dotvault/install.sh | sh</code></pre></div>
-    <p class="small">x86_64 and aarch64, glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9 or later). Installs <code>dotvault</code> into <code>~/.local/bin</code>.</p>
+    <p class="small">x86_64 and aarch64, glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9 or later). Installs <code>dotvault</code> into <code>~/.local/bin</code>. If that folder is not on your <code>PATH</code>, the installer adds it for new terminals by appending one line to your shell's startup file, and tells you which.</p>
   </section>
 
   <section class="platform" id="mac">
     <h3>macOS</h3>
     <div class="cmd"><pre><code>curl -fsSL https://yatharthkaushal.github.io/dotvault/install.sh | sh</code></pre></div>
-    <p class="small">Apple Silicon and Intel. Installs <code>dotvault</code> into <code>~/.local/bin</code>. The binaries are not signed; files fetched by this script are not quarantined by macOS.</p>
+    <p class="small">Apple Silicon and Intel. Installs <code>dotvault</code> into <code>~/.local/bin</code> and, if that folder is not on your <code>PATH</code>, adds it for new terminals through your shell's startup file (<code>~/.zshrc</code> for zsh). The binaries are not signed; files fetched by this script are not quarantined by macOS.</p>
   </section>
 
   <section class="platform" id="windows">
     <h3>Windows (PowerShell)</h3>
     <div class="cmd"><pre><code>irm https://yatharthkaushal.github.io/dotvault/install.ps1 | iex</code></pre></div>
-    <p class="small">x64. Installs <code>dotvault.exe</code> into <code>%LOCALAPPDATA%\Programs\dotvault</code> and adds that folder to your user <code>PATH</code>. No administrator rights needed.</p>
+    <p class="small">x64. Installs <code>dotvault.exe</code> into <code>%LOCALAPPDATA%\Programs\dotvault</code> and adds that folder to your user <code>PATH</code>, leaving every other entry as it was, and to the current window, so <code>dotvault</code> works at once; terminals that were already open need to be reopened. No administrator rights needed.</p>
   </section>
 
   <p>The scripts download the archive for your platform from GitHub Releases, check its SHA-256 checksum, and copy the binary into place. They never use <code>sudo</code>. Read them first: <a href="install.sh">install.sh</a>, <a href="install.ps1">install.ps1</a>.</p>
@@ -93,11 +93,11 @@
     <tr><th>Variable</th><th>Effect</th></tr>
     <tr><td><code>DOTVAULT_VERSION</code></td><td>Install this release, for example <code>v0.1.0</code>. Default: latest.</td></tr>
     <tr><td><code>DOTVAULT_INSTALL_DIR</code></td><td>Install into this folder.</td></tr>
-    <tr><td><code>DOTVAULT_NO_MODIFY_PATH</code></td><td>Windows only. Set to <code>1</code> to leave <code>PATH</code> alone.</td></tr>
+    <tr><td><code>DOTVAULT_NO_MODIFY_PATH</code></td><td>Set to <code>1</code> to leave <code>PATH</code> and your shell startup files alone. On Linux and macOS you can pass <code>--no-modify-path</code> instead.</td></tr>
   </table>
   <p>Set them on the <code>sh</code> side of the pipe:</p>
   <div class="cmd"><pre><code>curl -fsSL https://yatharthkaushal.github.io/dotvault/install.sh | DOTVAULT_VERSION=v0.1.0 sh</code></pre></div>
-  <p>Windows: <code>$env:DOTVAULT_VERSION = "v0.1.0"</code> before running the installer. Run an installer again to update. To uninstall, delete the binary.</p>
+  <p>Windows: <code>$env:DOTVAULT_VERSION = "v0.1.0"</code> before running the installer. Run an installer again to update. To uninstall, delete the binary and the <code>PATH</code> setup; the <a href="https://github.com/YatharthKaushal/dotvault#uninstall">README</a> lists the steps.</p>
 
   <h2 id="download">Download</h2>
   <p>Or download an archive yourself, extract it, and put <code>dotvault</code> on your <code>PATH</code>.</p>

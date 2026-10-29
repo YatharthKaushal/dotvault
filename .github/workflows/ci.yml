@@ -93,6 +93,12 @@ jobs:
       - name: Build
         run: cargo build --locked -p dotvault
 
+      # Real zsh and fish, so the files the installer writes are read by the shells
+      # they are for (macOS has zsh built in; fish is skipped there).
+      - name: Install zsh and fish
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+
       - name: install.sh
         if: runner.os != 'Windows'
         shell: bash
@@ -140,6 +146,9 @@ jobs:
           & "$env:DOTVAULT_INSTALL_DIR\dotvault.exe" --version
           if ($LASTEXITCODE -ne 0) { throw 'installed binary failed' }
 
+          # how the user PATH is changed, against the runner's real registry
+          & ./scripts/test-install-ps1-path.ps1
+
           # a wrong checksum must stop the installer and install nothing
           "0000000000000000000000000000000000000000000000000000000000000000 *$name" | Out-File -Encoding ascii "fake/$name.sha256"
           Remove-Item -Recurse -Force $env:DOTVAULT_INSTALL_DIR
@@ -164,3 +173,6 @@ jobs:
           Get-Content install.ps1 -Raw | Invoke-Expression
           & "$env:DOTVAULT_INSTALL_DIR\dotvault.exe" --version
           if ($LASTEXITCODE -ne 0) { throw 'installed binary failed' }
+
+          # how the user PATH is changed, against the runner's real registry
+          & ./scripts/test-install-ps1-path.ps1

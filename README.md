@@ -73,8 +73,8 @@ irm https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.ps1 
 ```
 
 The scripts download the archive for your platform from GitHub Releases, verify
-its SHA-256 checksum and copy the binary into place. They need no `sudo` or
-administrator rights. Read them first: [install.sh](install.sh),
+its SHA-256 checksum, copy the binary into place and put it on your `PATH` if it
+is not already there. They need no `sudo` or administrator rights. Read them first: [install.sh](install.sh),
 [install.ps1](install.ps1). You can also pick an archive yourself from the
 [releases page](https://github.com/YatharthKaushal/dotvault/releases), extract it
 and put `dotvault` on your `PATH`. The same commands and direct download links are
@@ -93,8 +93,8 @@ To check a download yourself, every archive has a `.sha256` file beside it:
 
 | | Linux and macOS | Windows |
 | :--- | :--- | :--- |
-| Installs to | `~/.local/bin/dotvault` | `%LOCALAPPDATA%\Programs\dotvault\dotvault.exe`, added to your user `PATH` |
-| Options | `DOTVAULT_VERSION`, `DOTVAULT_INSTALL_DIR` (or `--version`, `--dir`) | `DOTVAULT_VERSION`, `DOTVAULT_INSTALL_DIR`, `DOTVAULT_NO_MODIFY_PATH=1` |
+| Installs to | `~/.local/bin/dotvault`, added to your `PATH` if it is not on it | `%LOCALAPPDATA%\Programs\dotvault\dotvault.exe`, added to your user `PATH` |
+| Options | `DOTVAULT_VERSION`, `DOTVAULT_INSTALL_DIR`, `DOTVAULT_NO_MODIFY_PATH=1` (or `--version`, `--dir`, `--no-modify-path`) | `DOTVAULT_VERSION`, `DOTVAULT_INSTALL_DIR`, `DOTVAULT_NO_MODIFY_PATH=1` |
 
 Set the variables on the `sh` side of the pipe, because that is the process that
 reads them:
@@ -106,13 +106,33 @@ curl -fsSL https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/insta
 
 In PowerShell, set `$env:DOTVAULT_VERSION = "v0.1.0"` before running the installer.
 
-If the script says the install folder is not on your `PATH`, add it, for example
-`export PATH="$HOME/.local/bin:$PATH"` in your shell profile. On Windows, open a
-new terminal after installing. The macOS binaries are not signed; files fetched
-by the script are not quarantined, but one downloaded in a browser may be (clear
-it with `xattr -d com.apple.quarantine dotvault`). On Alpine and other musl
-systems, and on Linux older than glibc 2.34 (Ubuntu 20.04, Debian 11, RHEL 8),
-build from source.
+**Your `PATH`.** If the install folder is not already on your `PATH`, the
+installer adds it for you and says what it changed. Nothing is changed when it is
+already there.
+
+- **Windows:** the folder is added to your user `PATH` and to the PowerShell
+  window you ran the installer in, so `dotvault` works straight away. Every other
+  entry is kept exactly as it was, including ones that use variables such as
+  `%JAVA_HOME%\bin`. Terminals that were already open need to be reopened.
+- **Linux and macOS:** one line is appended to your login shell's startup file and
+  the installer names the file: `~/.zshrc` for zsh; `~/.bashrc` and the login file
+  bash reads (`~/.bash_profile`, `~/.bash_login` or `~/.profile`, whichever
+  exists first) for bash; `~/.profile` for sh, dash and ksh; and a file of its own,
+  `~/.config/fish/conf.d/dotvault.fish`, for fish. The line only sources
+  `~/.local/share/dotvault/env`, which does the work. Running the installer again
+  adds nothing twice. New terminals have `dotvault`; in the current one, run the
+  `. "$HOME/.local/share/dotvault/env"` line the installer prints.
+- **Opting out:** set `DOTVAULT_NO_MODIFY_PATH=1`, or pass `--no-modify-path` to
+  `install.sh`, and add the folder yourself, for example
+  `export PATH="$HOME/.local/bin:$PATH"`.
+- **Not covered:** shells with their own syntax (csh, tcsh, nushell) are left alone
+  and the installer prints what to add. Programs that do not read startup files,
+  such as cron jobs, need the folder on their `PATH` themselves.
+
+The macOS binaries are not signed; files fetched by the script are not
+quarantined, but one downloaded in a browser may be (clear it with
+`xattr -d com.apple.quarantine dotvault`). On Alpine and other musl systems, and on
+Linux older than glibc 2.34 (Ubuntu 20.04, Debian 11, RHEL 8), build from source.
 
 ### Update
 
@@ -141,9 +161,20 @@ To pin or roll back to a specific version, set `DOTVAULT_VERSION` as shown above
 
 ### Uninstall
 
-Delete the binary (and, on Windows, the folder and its `PATH` entry). Your env files,
-settings and saved login are not touched; delete the folders listed under
-[Configuration](#configuration) to remove those.
+Delete the binary and the `PATH` setup. Your env files, settings and saved login are
+not touched; delete the folders listed under [Configuration](#configuration) to
+remove those.
+
+- **Linux and macOS:** run `rm ~/.local/bin/dotvault ~/.local/share/dotvault/env`.
+  That already stops the `PATH` line from doing anything, and it is safe to leave in
+  place. To remove it too, delete the two lines marked
+  `# added by the dotvault installer` from `~/.zshrc`, `~/.bashrc` and `~/.profile`
+  (or `~/.bash_profile`), whichever have them. For fish, delete
+  `~/.config/fish/conf.d/dotvault.fish`. Do not delete the whole
+  `~/.local/share/dotvault` folder: it also holds the index and the history.
+- **Windows:** delete the folder `%LOCALAPPDATA%\Programs\dotvault`, then remove its
+  entry from your user `PATH`: Start, "Edit environment variables for your
+  account", select `Path` under User variables, Edit, and delete the dotvault line.
 
 ### From source
 

@@ -4,16 +4,24 @@
 #   curl -fsSL https://raw.githubusercontent.com/YatharthKaushal/dotvault/main/install.sh | sh
 #
 # It downloads the archive for this platform from GitHub Releases, checks its
-# SHA-256 checksum, and copies the binary into place. It never uses sudo and
-# does not edit your shell profile.
+# SHA-256 checksum, and copies the binary into place. It never uses sudo.
+#
+# If the install folder is not on your PATH it adds it for new terminals: one
+# line appended to your login shell's startup file (~/.zshrc, or ~/.bashrc and
+# the login file bash reads, or ~/.profile; fish gets its own conf.d file). The
+# line only sources ~/.local/share/dotvault/env, so deleting that file undoes it.
+# Nothing is changed when the folder is already on PATH, and --no-modify-path
+# leaves your shell alone.
 #
 # Environment variables:
-#   DOTVAULT_VERSION       release tag to install, for example v0.1.0 (default: latest)
-#   DOTVAULT_INSTALL_DIR   where to put the binary (default: $HOME/.local/bin)
-#   DOTVAULT_DOWNLOAD_URL  base URL that holds the release files (default: GitHub Releases)
-#   DOTVAULT_TARGET        use this target triple instead of detecting one
+#   DOTVAULT_VERSION         release tag to install, for example v0.1.0 (default: latest)
+#   DOTVAULT_INSTALL_DIR     where to put the binary (default: $HOME/.local/bin)
+#   DOTVAULT_NO_MODIFY_PATH  set to 1 to leave your PATH and shell startup files alone
+#   DOTVAULT_DOWNLOAD_URL    base URL that holds the release files (default: GitHub Releases)
+#   DOTVAULT_TARGET          use this target triple instead of detecting one
 #
-# Options (after `sh -s --` when piping): -h, --help, --version TAG, --dir DIR
+# Options (after `sh -s --` when piping): -h, --help, --version TAG, --dir DIR,
+# --no-modify-path
 
 set -eu
 
@@ -33,13 +41,18 @@ usage() {
     cat >&2 <<EOF
 Install $APP.
 
-Usage: install.sh [--version TAG] [--dir DIR]
+Usage: install.sh [--version TAG] [--dir DIR] [--no-modify-path]
 
-  --version TAG   release to install, for example v0.1.0 (default: latest)
-  --dir DIR       install into DIR (default: \$HOME/.local/bin)
-  -h, --help      show this help
+  --version TAG     release to install, for example v0.1.0 (default: latest)
+  --dir DIR         install into DIR (default: \$HOME/.local/bin)
+  --no-modify-path  do not put DIR on your PATH or touch your shell startup files
+  -h, --help        show this help
 
-Environment: DOTVAULT_VERSION, DOTVAULT_INSTALL_DIR, DOTVAULT_DOWNLOAD_URL, DOTVAULT_TARGET
+If DIR is not on your PATH, the installer adds it for new terminals by appending
+one line to your shell's startup file, and says which file.
+
+Environment: DOTVAULT_VERSION, DOTVAULT_INSTALL_DIR, DOTVAULT_NO_MODIFY_PATH,
+DOTVAULT_DOWNLOAD_URL, DOTVAULT_TARGET
 EOF
 }
 
@@ -146,6 +159,212 @@ sha256_of() {
     fi
 }
 
+# ---- putting the install folder on PATH --------------------------------------------
+
+MARK="# added by the dotvault installer"
+
+# Single-quotes $1 for a POSIX shell, so it is safe to paste into a script:
+# it's -> 'it'\''s'
+sh_quote() {
+    q="'"
+    rest=$1
+    quoted=
+    while :; do
+        case $rest in
+            *"$q"*)
+                head=${rest%%"$q"*}
+                quoted="$quoted$head'\\''"
+                rest=${rest#*"$q"}
+                ;;
+            *)
+                quoted="$quoted$rest"
+                break
+                ;;
+        esac
+    done
+    printf "'%s'" "$quoted"
+}
+
+# Prints $1 as it should appear in a profile script: "$HOME/..." when it lives
+# under $HOME (so a dotfile synced to another machine still works), else quoted.
+sh_path() {
+    case $1 in
+        "$HOME") printf '"$HOME"' ;;
+        "$HOME"/*)
+            tail_part=${1#"$HOME"}
+            case $tail_part in
+                *[!A-Za-z0-9._/+-]*) printf '"$HOME"%s' "$(sh_quote "$tail_part")" ;;
+                *) printf '"$HOME%s"' "$tail_part" ;;
+            esac
+            ;;
+        *) sh_quote "$1" ;;
+    esac
+}
+
+# $1 with a leading $HOME shown as ~
+show_path() {
+    case $1 in
+        "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+# What to do by hand, for when the installer cannot or was told not to.
+manual_path_hint() {
+    say ""
+    say "$1 is not on your PATH. Add it with:"
+    say "  export PATH=\"$1:\$PATH\""
+    say "and put that line in your shell profile (~/.bashrc, ~/.zshrc, ...)."
+}
+
+# Writes the env file that puts $2 on PATH, once, whatever shell sources it.
+write_env_file() {
+    envp=$(sh_path "$2")
+    mkdir -p "${1%/*}" 2>/dev/null || return 1
+    {
+        printf '%s\n' "# Added by the dotvault installer: puts the install folder on PATH."
+        printf '%s\n' "# Delete this file, and the line that sources it, to undo."
+        printf 'case ":${PATH}:" in\n'
+        printf '    *":"%s":"*) ;;\n' "$envp"
+        printf '    *) export PATH=%s"${PATH:+:${PATH}}" ;;\n' "$envp"
+        printf 'esac\n'
+    } >"$1" 2>/dev/null
+}
+
+# Appends $2 to the startup file $1 unless dotvault is already sourced there.
+# Prints added, present or failed. Keeps the file's mode, owner and symlink.
+add_source_line() {
+    file=$1
+    if [ -f "$file" ] && grep -F -q 'dotvault/env' "$file" 2>/dev/null; then
+        printf present
+        return 0
+    fi
+    mkdir -p "${file%/*}" 2>/dev/null || {
+        printf failed
+        return 0
+    }
+    # The leading newline also ends a last line that has none, so our comment
+    # never lands on the end of the user's last line.
+    if printf '\n%s\n%s\n' "$MARK" "$2" >>"$file" 2>/dev/null; then
+        printf added
+    else
+        printf failed
+    fi
+}
+
+# The startup files for the login shell, one per line. Fails for shells whose
+# syntax is not POSIX sh.
+profile_files() {
+    case $1 in
+        zsh) printf '%s\n' "${ZDOTDIR:-$HOME}/.zshrc" ;;
+        bash)
+            printf '%s\n' "$HOME/.bashrc"
+            # bash reads only the first of these, and creating .bash_profile
+            # when .profile exists would hide .profile
+            for f in .bash_profile .bash_login .profile; do
+                if [ -e "$HOME/$f" ]; then
+                    printf '%s\n' "$HOME/$f"
+                    return 0
+                fi
+            done
+            printf '%s\n' "$HOME/.profile"
+            ;;
+        sh | dash | ksh | ash | mksh | "") printf '%s\n' "$HOME/.profile" ;;
+        *) return 1 ;;
+    esac
+}
+
+# $1 is the install folder, which is not on PATH.
+path_setup() {
+    dir=$1
+    if [ "${DOTVAULT_NO_MODIFY_PATH:-}" = 1 ]; then
+        manual_path_hint "$dir"
+        return 0
+    fi
+    if [ -z "${HOME:-}" ] || ! command -v grep >/dev/null 2>&1; then
+        manual_path_hint "$dir"
+        return 0
+    fi
+    shell=${SHELL:-}
+    shell=${shell##*/}
+
+    if [ "$shell" = fish ]; then
+        conf="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/dotvault.fish"
+        case $dir in
+            *"'"* | *'\'*)
+                manual_path_hint "$dir"
+                return 0
+                ;;
+        esac
+        wanted="# Added by the dotvault installer. Delete this file to undo.
+if not contains -- '$dir' \$PATH
+    set -gx PATH '$dir' \$PATH
+end"
+        if [ -f "$conf" ] && [ "$(cat "$conf" 2>/dev/null)" = "$wanted" ]; then
+            say ""
+            say "$(show_path "$dir") is already set up for new terminals in $(show_path "$conf")"
+        elif mkdir -p "${conf%/*}" 2>/dev/null && printf '%s\n' "$wanted" >"$conf" 2>/dev/null; then
+            say ""
+            say "added $(show_path "$dir") to your PATH in $(show_path "$conf")"
+        else
+            say ""
+            say "warning: could not write $(show_path "$conf")"
+            manual_path_hint "$dir"
+            return 0
+        fi
+        say "open a new terminal, or run this to use it now:"
+        say "  source $(show_path "$conf")"
+        return 0
+    fi
+
+    files=$(profile_files "$shell") || {
+        say ""
+        say "your shell ($shell) is one the installer cannot set up for you."
+        manual_path_hint "$dir"
+        return 0
+    }
+    envfile="${XDG_DATA_HOME:-$HOME/.local/share}/dotvault/env"
+    if ! write_env_file "$envfile" "$dir"; then
+        say ""
+        say "warning: could not write $(show_path "$envfile")"
+        manual_path_hint "$dir"
+        return 0
+    fi
+    envq=$(sh_path "$envfile")
+    line="[ -f $envq ] && . $envq"
+
+    added=
+    present=
+    failed=
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        case $(add_source_line "$f" "$line") in
+            added) added="${added:+$added, }$(show_path "$f")" ;;
+            present) present="${present:+$present, }$(show_path "$f")" ;;
+            *) failed="${failed:+$failed, }$(show_path "$f")" ;;
+        esac
+    done <<EOF
+$files
+EOF
+
+    if [ -n "$failed" ]; then
+        say ""
+        say "warning: could not write to $failed"
+        manual_path_hint "$dir"
+    fi
+    if [ -n "$added" ]; then
+        say ""
+        say "added $(show_path "$dir") to your PATH in $added"
+    elif [ -n "$present" ]; then
+        say ""
+        say "$(show_path "$dir") is already set up for new terminals in $present"
+    fi
+    if [ -n "$added$present" ]; then
+        say "open a new terminal, or run this to use it now:"
+        say "  . $envq"
+    fi
+}
+
 main() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -162,6 +381,10 @@ main() {
                 [ $# -ge 2 ] || err "--dir needs a folder"
                 DOTVAULT_INSTALL_DIR=$2
                 shift 2
+                ;;
+            --no-modify-path)
+                DOTVAULT_NO_MODIFY_PATH=1
+                shift
                 ;;
             *)
                 usage
@@ -228,14 +451,11 @@ main() {
     version=$("$dir/$APP" --version 2>/dev/null) || err "installed $dir/$APP but it does not run on this system"
     say "installed $version to $dir/$APP"
 
+    # PATH entries must be absolute, so compare and set up the absolute form.
+    abs=$(cd "$dir" 2>/dev/null && pwd) || abs=$dir
     case ":${PATH:-}:" in
-        *":$dir:"*) ;;
-        *)
-            say ""
-            say "$dir is not on your PATH. Add it with:"
-            say "  export PATH=\"$dir:\$PATH\""
-            say "and put that line in your shell profile (~/.bashrc, ~/.zshrc, ...)."
-            ;;
+        *":$abs:"*) ;;
+        *) path_setup "$abs" ;;
     esac
 }
 
